@@ -1,0 +1,26 @@
+# dependencies & build output
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+*.log
+
+# secrets: every .env file except the template
+.env*
+!.env.example
+
+# local data
+data/*
+!data/.gitkeep
+
+# local tool settings
+.claude/settings.local.json
+.vercel/
+.DS_Store
+
+# eval runs: keep each flow's config (_state.json) and scored results; drop traces, DBs and scratch
+.claude/hillclimb/**
+!.claude/hillclimb/**/
+!.claude/hillclimb/*/_state.json
+!.claude/hillclimb/*/*/results.jsonl

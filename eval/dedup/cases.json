@@ -1,0 +1,632 @@
+[
+  {
+    "id": "dup-versailles",
+    "tags": [
+      "dup-paraphrase"
+    ],
+    "question": "When did WW1 end officially?",
+    "passage": "The war formally ended with the Treaty of Versailles, which was signed on 28 June 1919.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The Treaty of Versailles was signed on 28 June 1919."
+      },
+      {
+        "key": "b",
+        "claim": "The armistice ending fighting in WW1 took effect on 11 November 1918."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Same treaty, same date, reworded.",
+    "either": false
+  },
+  {
+    "id": "dup-tungsten",
+    "tags": [
+      "dup-paraphrase"
+    ],
+    "question": "What's tungsten's symbol?",
+    "passage": "Tungsten's chemical symbol is W, from its older name wolfram.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The chemical symbol for tungsten is W."
+      },
+      {
+        "key": "b",
+        "claim": "Tungsten has the highest melting point of all metals."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Same fact; the etymology is a small addition that doesn't change the verdict.",
+    "either": true
+  },
+  {
+    "id": "dup-everest",
+    "tags": [
+      "dup-paraphrase"
+    ],
+    "question": "How tall is Everest?",
+    "passage": "Mount Everest stands about 8,849 metres above sea level.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Mount Everest is approximately 8,849 m tall."
+      },
+      {
+        "key": "b",
+        "claim": "Mount Everest is on the border of Nepal and China."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Same approximate figure, unit abbreviated.",
+    "either": false
+  },
+  {
+    "id": "dup-reorder-curie",
+    "tags": [
+      "dup-reorder"
+    ],
+    "question": "Who won two science Nobels?",
+    "passage": "In 1911 Marie Curie won the Nobel Prize in Chemistry, having already won Physics in 1903.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Marie Curie won Nobel Prizes in Physics (1903) and Chemistry (1911)."
+      },
+      {
+        "key": "b",
+        "claim": "Marie Curie was born in Warsaw."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Same two prizes and years, reordered.",
+    "either": false
+  },
+  {
+    "id": "dup-pronoun",
+    "tags": [
+      "dup-paraphrase"
+    ],
+    "question": "Tell me about the Eiffel Tower.",
+    "passage": "It was completed in 1889 for the Exposition Universelle.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The Eiffel Tower was completed in 1889 for the Exposition Universelle."
+      },
+      {
+        "key": "b",
+        "claim": "The Eiffel Tower is about 330 metres tall."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Pronoun resolves to the Eiffel Tower; otherwise identical.",
+    "either": false
+  },
+  {
+    "id": "dup-units",
+    "tags": [
+      "dup-paraphrase"
+    ],
+    "question": "How fast is light?",
+    "passage": "Light travels at 299,792,458 metres per second in a vacuum.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The speed of light in vacuum is 299,792,458 m/s."
+      },
+      {
+        "key": "b",
+        "claim": "Light from the Sun takes about 8 minutes to reach Earth."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Identical exact value.",
+    "either": false
+  },
+  {
+    "id": "dup-artemis-flown",
+    "tags": [
+      "dup-paraphrase"
+    ],
+    "question": "Has Artemis II flown?",
+    "passage": "Artemis II has already flown: it carried four astronauts around the Moon in April 2026.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Artemis II flew a crewed mission around the Moon in April 2026."
+      },
+      {
+        "key": "b",
+        "claim": "Artemis II is planned as a crewed flight around the Moon."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Same completed-status claim; must pick (a), not the 'planned' one.",
+    "either": false
+  },
+  {
+    "id": "dup-ceo-dated",
+    "tags": [
+      "dup-paraphrase"
+    ],
+    "question": "Who ran Microsoft in 2015?",
+    "passage": "In 2015, Microsoft's CEO was Satya Nadella.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Satya Nadella was the CEO of Microsoft in 2015."
+      },
+      {
+        "key": "b",
+        "claim": "Satya Nadella is the current CEO of Microsoft."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Same dated claim; (b) is undated/current and must not be chosen.",
+    "either": false
+  },
+  {
+    "id": "dup-water-boil",
+    "tags": [
+      "dup-paraphrase"
+    ],
+    "question": "At what temperature does water boil?",
+    "passage": "At sea level, pure water boils at 100 °C.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Pure water boils at 100 degrees Celsius at standard sea-level pressure."
+      },
+      {
+        "key": "b",
+        "claim": "Water freezes at 0 °C at sea level."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Same claim with same qualifier.",
+    "either": false
+  },
+  {
+    "id": "dup-moon-landings",
+    "tags": [
+      "dup-paraphrase"
+    ],
+    "question": "How many crewed Moon landings were there?",
+    "passage": "Six Apollo missions landed astronauts on the Moon.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Humans have landed on the Moon six times, all during NASA's Apollo program."
+      },
+      {
+        "key": "b",
+        "claim": "Twelve people have walked on the Moon."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Same count; 'all during Apollo' is implied by 'six Apollo missions'.",
+    "either": false
+  },
+  {
+    "id": "trap-artemis-status",
+    "tags": [
+      "trap-tense"
+    ],
+    "question": "What happened to Artemis II?",
+    "passage": "Artemis II went around the Moon without landing.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "NASA's Artemis II is planned as a crewed flight around the Moon."
+      },
+      {
+        "key": "b",
+        "claim": "Artemis III is intended to land astronauts near the lunar south pole."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "The real failure: planned vs completed. A verdict on 'planned' (outdated) is wrong for 'went around'.",
+    "either": false
+  },
+  {
+    "id": "trap-jwst-status",
+    "tags": [
+      "trap-tense"
+    ],
+    "question": "Is JWST working?",
+    "passage": "The James Webb Space Telescope launched on 25 December 2021.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The James Webb Space Telescope is scheduled to launch in 2021."
+      },
+      {
+        "key": "b",
+        "claim": "JWST observes mainly in infrared."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Scheduled vs launched with a specific date.",
+    "either": false
+  },
+  {
+    "id": "trap-ceo-current",
+    "tags": [
+      "trap-time"
+    ],
+    "question": "Who runs Twitter/X?",
+    "passage": "Linda Yaccarino was appointed CEO of X in 2023.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Linda Yaccarino is the current CEO of X."
+      },
+      {
+        "key": "b",
+        "claim": "Elon Musk bought Twitter in 2022."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Appointment in 2023 is a stable historical fact; 'current CEO' is time-sensitive and can be false.",
+    "either": false
+  },
+  {
+    "id": "trap-number",
+    "tags": [
+      "trap-number"
+    ],
+    "question": "How tall is Everest?",
+    "passage": "Mount Everest is 8,848 metres tall.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Mount Everest is 8,849 metres tall."
+      },
+      {
+        "key": "b",
+        "claim": "Mount Everest is the highest mountain above sea level."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Different figure (older survey value); verdicts can differ.",
+    "either": false
+  },
+  {
+    "id": "trap-year",
+    "tags": [
+      "trap-number"
+    ],
+    "question": "When did the Berlin Wall fall?",
+    "passage": "The Berlin Wall fell in 1990.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The Berlin Wall fell in 1989."
+      },
+      {
+        "key": "b",
+        "claim": "Germany reunified in 1990."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Different year: one is true, the other false.",
+    "either": false
+  },
+  {
+    "id": "trap-precision",
+    "tags": [
+      "trap-precision"
+    ],
+    "question": "When was the Great Pyramid built?",
+    "passage": "The Great Pyramid of Giza was completed in exactly 2560 BC.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The Great Pyramid of Giza was completed around 2560 BC."
+      },
+      {
+        "key": "b",
+        "claim": "The Great Pyramid was built for the pharaoh Khufu."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "'Exactly' vs 'around': the exact version is unsupported.",
+    "either": false
+  },
+  {
+    "id": "trap-entity-artemis",
+    "tags": [
+      "trap-entity"
+    ],
+    "question": "What's Artemis III?",
+    "passage": "Artemis IV is planned as the first crewed landing near the lunar south pole.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Artemis III is intended to land astronauts near the lunar south pole."
+      },
+      {
+        "key": "b",
+        "claim": "Artemis II flew around the Moon in April 2026."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Same predicate, different mission.",
+    "either": false
+  },
+  {
+    "id": "trap-entity-person",
+    "tags": [
+      "trap-entity"
+    ],
+    "question": "Who discovered penicillin?",
+    "passage": "Howard Florey led the team that turned penicillin into a usable drug.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Alexander Fleming discovered penicillin in 1928."
+      },
+      {
+        "key": "b",
+        "claim": "Penicillin was first mass-produced during World War II."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Different person and different claim; related at most.",
+    "either": false
+  },
+  {
+    "id": "trap-scope",
+    "tags": [
+      "trap-scope"
+    ],
+    "question": "Do all birds fly?",
+    "passage": "Most bird species can fly.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "All bird species can fly."
+      },
+      {
+        "key": "b",
+        "claim": "Penguins are flightless birds."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "'Most' vs 'all': one is true, the other false.",
+    "either": false
+  },
+  {
+    "id": "trap-qualifier",
+    "tags": [
+      "trap-qualifier"
+    ],
+    "question": "When does water boil?",
+    "passage": "Water always boils at 100 °C.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Pure water boils at 100 °C at sea-level pressure."
+      },
+      {
+        "key": "b",
+        "claim": "Water boils at lower temperatures at altitude."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Dropping the pressure qualifier ('always') changes truth.",
+    "either": false
+  },
+  {
+    "id": "trap-negation",
+    "tags": [
+      "trap-negation"
+    ],
+    "question": "Is the Great Wall visible from space?",
+    "passage": "The Great Wall of China is not visible to the naked eye from low Earth orbit.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The Great Wall of China is visible to the naked eye from space."
+      },
+      {
+        "key": "b",
+        "claim": "The Great Wall is over 20,000 km long including all branches."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Negation: opposite claims, opposite verdicts.",
+    "either": false
+  },
+  {
+    "id": "trap-superset",
+    "tags": [
+      "dup-split"
+    ],
+    "question": "Tell me about Curie.",
+    "passage": "Marie Curie won two Nobel Prizes and was the first woman to win one.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Marie Curie won two Nobel Prizes."
+      },
+      {
+        "key": "b",
+        "claim": "Marie Curie discovered polonium and radium."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "The extractor may split this into 'won two Nobel Prizes' (a true duplicate of a) and 'first woman to win one' (new). Merging the split part into a is right; merging the combined claim would not be, so either passes, but never b.",
+    "either": true
+  },
+  {
+    "id": "trap-subset",
+    "tags": [
+      "trap-superset"
+    ],
+    "question": "Tell me about Everest.",
+    "passage": "Mount Everest is the highest mountain above sea level.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Mount Everest is the highest mountain above sea level and was first climbed in 1953 by Hillary and Norgay."
+      },
+      {
+        "key": "b",
+        "claim": "Mount Everest is 8,849 m tall."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Known claim is a superset; its verdict/correction may concern the 1953 part.",
+    "either": false
+  },
+  {
+    "id": "trap-cause",
+    "tags": [
+      "trap-qualifier"
+    ],
+    "question": "Why did the Titanic sink?",
+    "passage": "The Titanic sank after striking an iceberg on its maiden voyage in 1912.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The Titanic sank in 1912."
+      },
+      {
+        "key": "b",
+        "claim": "The Titanic sank because its hull steel was defective."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "(a) is only part of it; (b) is a different causal claim.",
+    "either": false
+  },
+  {
+    "id": "trap-record-holder",
+    "tags": [
+      "trap-time"
+    ],
+    "question": "What's the tallest building?",
+    "passage": "The Burj Khalifa was the tallest building in the world when it opened in 2010.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The Burj Khalifa is the tallest building in the world."
+      },
+      {
+        "key": "b",
+        "claim": "The Burj Khalifa is in Dubai."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Historical 'when it opened' vs present-tense record that could change.",
+    "either": false
+  },
+  {
+    "id": "trap-population",
+    "tags": [
+      "trap-time"
+    ],
+    "question": "How many people live in Tokyo?",
+    "passage": "Tokyo's metropolitan area had about 37 million people in 2020.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Tokyo's metropolitan area has about 37 million people."
+      },
+      {
+        "key": "b",
+        "claim": "Tokyo is the capital of Japan."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Dated vs undated population; the undated one goes stale.",
+    "either": false
+  },
+  {
+    "id": "trap-comparative",
+    "tags": [
+      "trap-scope"
+    ],
+    "question": "Is Venus hot?",
+    "passage": "Venus is the hottest planet in the Solar System.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Venus is hotter than Mercury."
+      },
+      {
+        "key": "b",
+        "claim": "Venus has a thick carbon dioxide atmosphere."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Related comparative, different proposition (hottest of all vs hotter than one).",
+    "either": false
+  },
+  {
+    "id": "trap-unit",
+    "tags": [
+      "trap-number"
+    ],
+    "question": "How long is a marathon?",
+    "passage": "A marathon is 42.195 miles long.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "A marathon is 42.195 kilometres long."
+      },
+      {
+        "key": "b",
+        "claim": "The marathon distance was standardised in 1921."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Same number, wrong unit: true vs false.",
+    "either": false
+  },
+  {
+    "id": "dup-artemis-crew",
+    "tags": [
+      "dup-borderline"
+    ],
+    "question": "Who flew on Artemis II?",
+    "passage": "Artemis II's crew was Reid Wiseman, Victor Glover, Christina Koch and Jeremy Hansen.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "The Artemis II crew, announced in 2023, was Reid Wiseman, Victor Glover, Christina Koch, and Jeremy Hansen."
+      },
+      {
+        "key": "b",
+        "claim": "Artemis II launched on April 1, 2026."
+      }
+    ],
+    "duplicate": "a",
+    "rationale": "Same crew list; the known claim's 'announced in 2023' is an extra detail. Borderline: listed as a duplicate, but 'related' would be defensible.",
+    "either": true
+  },
+  {
+    "id": "trap-attribution",
+    "tags": [
+      "trap-qualifier"
+    ],
+    "question": "Who said 'Be the change'?",
+    "passage": "Gandhi is often credited with saying 'Be the change you wish to see in the world', but there's no record he said it.",
+    "known": [
+      {
+        "key": "a",
+        "claim": "Gandhi said 'Be the change you wish to see in the world.'"
+      },
+      {
+        "key": "b",
+        "claim": "Gandhi led the Salt March in 1930."
+      }
+    ],
+    "duplicate": null,
+    "rationale": "Attribution vs claim the attribution is unsupported: opposite propositions.",
+    "either": false
+  }
+]

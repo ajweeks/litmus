@@ -1,0 +1,948 @@
+[
+  {
+    "id": "true-versailles",
+    "tags": [
+      "true-known",
+      "facts"
+    ],
+    "claim": "The Treaty of Versailles was signed on 28 June 1919.",
+    "context": "When did WW1 officially end?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Signed in the Hall of Mirrors, 28 June 1919."
+  },
+  {
+    "id": "true-tungsten",
+    "tags": [
+      "true-known",
+      "facts"
+    ],
+    "claim": "The chemical symbol for tungsten is W.",
+    "context": "What's the symbol for tungsten?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "W, from 'wolfram'."
+  },
+  {
+    "id": "true-curie",
+    "tags": [
+      "true-known",
+      "facts"
+    ],
+    "claim": "Marie Curie won Nobel Prizes in both Physics (1903) and Chemistry (1911).",
+    "context": "Who has won Nobel prizes in two sciences?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Physics 1903 (shared), Chemistry 1911."
+  },
+  {
+    "id": "true-pacific",
+    "tags": [
+      "true-known",
+      "facts"
+    ],
+    "claim": "The Pacific Ocean is the largest ocean on Earth by surface area.",
+    "context": "Which ocean is largest?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "About 165 million km²."
+  },
+  {
+    "id": "true-http418",
+    "tags": [
+      "true-known",
+      "facts"
+    ],
+    "claim": "HTTP status code 418 'I'm a teapot' was defined in RFC 2324.",
+    "context": "Is 418 a real HTTP status code?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "RFC 2324 (HTCPCP, April 1998)."
+  },
+  {
+    "id": "obscure-philae",
+    "tags": [
+      "true-obscure",
+      "facts"
+    ],
+    "claim": "The Philae lander touched down on comet 67P/Churyumov–Gerasimenko on 12 November 2014.",
+    "context": "When did we first land on a comet?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "ESA Rosetta mission; landing 12 Nov 2014."
+  },
+  {
+    "id": "obscure-python",
+    "tags": [
+      "true-obscure",
+      "facts"
+    ],
+    "claim": "Python's first public release, version 0.9.0, was published in February 1991.",
+    "context": "How old is Python?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Posted to alt.sources on 20 Feb 1991."
+  },
+  {
+    "id": "obscure-seedvault",
+    "tags": [
+      "true-obscure",
+      "facts"
+    ],
+    "claim": "The Svalbard Global Seed Vault officially opened in February 2008.",
+    "context": "Tell me about the doomsday seed vault.",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Opened 26 Feb 2008."
+  },
+  {
+    "id": "obscure-baikal",
+    "tags": [
+      "true-obscure",
+      "facts"
+    ],
+    "claim": "Lake Baikal is the deepest lake in the world, with a maximum depth of about 1,640 metres.",
+    "context": "What's the deepest lake?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Max depth ~1,642 m."
+  },
+  {
+    "id": "obscure-hubble",
+    "tags": [
+      "true-obscure",
+      "facts"
+    ],
+    "claim": "The Hubble Space Telescope was launched aboard Space Shuttle Discovery in April 1990.",
+    "context": "When was Hubble launched?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "STS-31, 24 April 1990."
+  },
+  {
+    "id": "obscure-telegraph",
+    "tags": [
+      "true-obscure",
+      "facts"
+    ],
+    "claim": "The first transatlantic telegraph cable was completed in 1858.",
+    "context": "When could Europe and America first communicate instantly?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Completed Aug 1858; failed within weeks (1866 cable was the first durable one)."
+  },
+  {
+    "id": "surprising-oxford",
+    "tags": [
+      "true-surprising",
+      "facts"
+    ],
+    "claim": "Teaching at the University of Oxford began before the Aztec city of Tenochtitlan was founded.",
+    "context": "Give me a surprising history fact.",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Teaching at Oxford existed by 1096; Tenochtitlan founded c. 1325."
+  },
+  {
+    "id": "surprising-cleopatra",
+    "tags": [
+      "true-surprising",
+      "facts"
+    ],
+    "claim": "Cleopatra lived closer in time to the Moon landing than to the construction of the Great Pyramid of Giza.",
+    "context": "Give me a mind-bending time fact.",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Cleopatra d. 30 BC; pyramid c. 2560 BC (~2,500 yrs earlier); Moon landing ~2,000 yrs later."
+  },
+  {
+    "id": "surprising-banana",
+    "tags": [
+      "true-surprising",
+      "facts"
+    ],
+    "claim": "Bananas are botanically classified as berries, while strawberries are not.",
+    "context": "Is a banana a berry?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Standard botanical definitions; strawberry is an aggregate accessory fruit."
+  },
+  {
+    "id": "surprising-wombat",
+    "tags": [
+      "true-surprising",
+      "facts"
+    ],
+    "claim": "Wombats produce cube-shaped droppings.",
+    "context": "Weird animal facts?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Documented; 2018 study on intestinal elasticity."
+  },
+  {
+    "id": "surprising-sharks",
+    "tags": [
+      "true-surprising",
+      "facts"
+    ],
+    "claim": "Sharks have existed for longer than trees.",
+    "context": "How old are sharks?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Sharks ~450 Mya; earliest trees ~385–390 Mya."
+  },
+  {
+    "id": "nitpick-pyramid-date",
+    "tags": [
+      "nitpick",
+      "facts"
+    ],
+    "claim": "The Great Pyramid of Giza was built around 2560 BC.",
+    "context": "How old is the Great Pyramid?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "importance": [
+      "minor"
+    ],
+    "rationale": "Conventional date; scholarly ranges (c. 2600–2560 BC) don't make 'around 2560 BC' wrong."
+  },
+  {
+    "id": "nitpick-lightspeed",
+    "tags": [
+      "nitpick",
+      "facts"
+    ],
+    "claim": "Light travels at about 300,000 kilometres per second.",
+    "context": "How fast is light?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "importance": [
+      "minor"
+    ],
+    "rationale": "299,792 km/s rounds to 300,000."
+  },
+  {
+    "id": "nitpick-everest-round",
+    "tags": [
+      "nitpick",
+      "facts"
+    ],
+    "claim": "Mount Everest is roughly 8,850 metres tall.",
+    "context": "How tall is Everest?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "importance": [
+      "minor"
+    ],
+    "rationale": "8,848.86 m rounds to about 8,850."
+  },
+  {
+    "id": "nitpick-moon-distance",
+    "tags": [
+      "nitpick",
+      "facts"
+    ],
+    "claim": "The Moon is about 384,000 km from Earth.",
+    "context": "How far away is the Moon?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "importance": [
+      "minor"
+    ],
+    "rationale": "Average distance ~384,400 km; varies with orbit."
+  },
+  {
+    "id": "nitpick-boiling",
+    "tags": [
+      "nitpick",
+      "facts"
+    ],
+    "claim": "Water boils at 100 °C at sea level.",
+    "context": "What temperature does water boil at?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "importance": [
+      "minor"
+    ],
+    "rationale": "Standard statement; 99.97 °C under ITS-90 is a pedantic distinction."
+  },
+  {
+    "id": "nitpick-sunlight",
+    "tags": [
+      "nitpick",
+      "facts"
+    ],
+    "claim": "Sunlight takes about 8 minutes to reach Earth.",
+    "context": "How long does sunlight take to reach us?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "importance": [
+      "minor"
+    ],
+    "rationale": "About 8 min 20 s on average."
+  },
+  {
+    "id": "nitpick-bones",
+    "tags": [
+      "nitpick",
+      "facts"
+    ],
+    "claim": "An adult human skeleton has 206 bones.",
+    "context": "How many bones do adults have?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "importance": [
+      "minor"
+    ],
+    "rationale": "Standard count; individual variation (sesamoids etc.) doesn't make it wrong."
+  },
+  {
+    "id": "nitpick-ww2",
+    "tags": [
+      "nitpick",
+      "facts"
+    ],
+    "claim": "World War II ended in 1945.",
+    "context": "When did WW2 end?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "importance": [
+      "minor"
+    ],
+    "rationale": "VE Day May 1945, Japan's surrender Aug/Sept 1945."
+  },
+  {
+    "id": "num-berlinwall",
+    "tags": [
+      "numeric-error",
+      "facts"
+    ],
+    "claim": "The Berlin Wall fell on 9 November 1990.",
+    "context": "When did the Berlin Wall fall?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "partially_supported"
+    ],
+    "rationale": "9 November 1989.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "num-everest",
+    "tags": [
+      "nitpick",
+      "facts"
+    ],
+    "claim": "The official height of Mount Everest, jointly announced by China and Nepal in 2020, is 8,849.86 metres.",
+    "context": "How tall is Everest?",
+    "expected": "partially_supported",
+    "acceptable": [
+      "partially_supported",
+      "supported"
+    ],
+    "rationale": "Announced height is 8,848.86 m. One metre off: technically wrong, but no one is misled. It should not be shown at the default threshold.",
+    "importance": [
+      "minor"
+    ]
+  },
+  {
+    "id": "num-lightspeed",
+    "tags": [
+      "numeric-error",
+      "facts"
+    ],
+    "claim": "The speed of light in a vacuum is exactly 299,792,458 kilometres per second.",
+    "context": "What's the exact speed of light?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "partially_supported"
+    ],
+    "rationale": "Unit error: 299,792,458 metres per second.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "num-genome",
+    "tags": [
+      "numeric-error",
+      "facts"
+    ],
+    "claim": "The human genome contains roughly 3 billion base pairs and about 50,000 protein-coding genes.",
+    "context": "How big is the human genome?",
+    "expected": "partially_supported",
+    "acceptable": [
+      "partially_supported",
+      "refuted"
+    ],
+    "rationale": "~3.1 billion bp is right; ~19,000–20,000 protein-coding genes.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "num-apollo",
+    "tags": [
+      "numeric-error",
+      "facts"
+    ],
+    "claim": "Apollo 11's lunar module landed on 20 July 1969, and Neil Armstrong stepped onto the surface about 30 minutes later.",
+    "context": "Walk me through the Moon landing.",
+    "expected": "partially_supported",
+    "acceptable": [
+      "partially_supported",
+      "refuted"
+    ],
+    "rationale": "Landed 20:17 UTC; first step 02:56 UTC on 21 July, about 6.5 hours later.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "num-londonfire",
+    "tags": [
+      "numeric-error",
+      "facts"
+    ],
+    "claim": "The Great Fire of London began in September 1667.",
+    "context": "When was the Great Fire of London?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "partially_supported"
+    ],
+    "rationale": "2 September 1666.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "num-eiffel",
+    "tags": [
+      "numeric-error",
+      "facts"
+    ],
+    "claim": "The Eiffel Tower is about 450 metres tall including its antennas.",
+    "context": "How tall is the Eiffel Tower?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "partially_supported"
+    ],
+    "rationale": "About 330 m including antennas.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "attr-gandhi",
+    "tags": [
+      "misattribution",
+      "facts"
+    ],
+    "claim": "Mahatma Gandhi said 'Be the change you wish to see in the world.'",
+    "context": "Who said 'be the change'?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "misleading",
+      "partially_supported"
+    ],
+    "rationale": "No record of Gandhi saying this; it paraphrases a longer 1913 passage of his.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "attr-edison",
+    "tags": [
+      "misattribution",
+      "facts"
+    ],
+    "claim": "Thomas Edison was granted the first US patent for the telephone in 1876.",
+    "context": "Who invented the telephone?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted"
+    ],
+    "rationale": "Alexander Graham Bell, US patent 174,465, March 1876.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "attr-lyell",
+    "tags": [
+      "misattribution",
+      "facts"
+    ],
+    "claim": "Continental drift was first proposed by Charles Lyell in 1912.",
+    "context": "Where did plate tectonics come from?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "partially_supported"
+    ],
+    "rationale": "Alfred Wegener, 1912. (Lyell died in 1875.)",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "attr-einstein",
+    "tags": [
+      "misattribution",
+      "facts"
+    ],
+    "claim": "Albert Einstein wrote that 'the definition of insanity is doing the same thing over and over and expecting different results.'",
+    "context": "Who defined insanity as repeating the same thing?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "misleading"
+    ],
+    "rationale": "Misattributed; earliest known appearances are from the 1980s (Narcotics Anonymous literature).",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "stale-pluto",
+    "tags": [
+      "outdated",
+      "facts"
+    ],
+    "claim": "Pluto is the ninth planet of our solar system.",
+    "context": "How many planets are there?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "partially_supported",
+      "misleading"
+    ],
+    "rationale": "Reclassified as a dwarf planet by the IAU in 2006.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "stale-willis",
+    "tags": [
+      "outdated",
+      "facts"
+    ],
+    "claim": "The world's tallest building is the Willis Tower in Chicago.",
+    "context": "What's the tallest building in the world?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "partially_supported"
+    ],
+    "rationale": "Burj Khalifa (since 2010); Willis lost the title in 1998.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "stale-monarch",
+    "tags": [
+      "outdated",
+      "facts"
+    ],
+    "claim": "The current monarch of the United Kingdom is Queen Elizabeth II.",
+    "context": "Who is the UK's head of state?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "partially_supported"
+    ],
+    "rationale": "Charles III since September 2022.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "stale-http",
+    "tags": [
+      "outdated",
+      "facts"
+    ],
+    "claim": "The newest major version of HTTP standardised by the IETF is HTTP/2.",
+    "context": "What's the latest HTTP version?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "partially_supported"
+    ],
+    "rationale": "HTTP/3, RFC 9114 (June 2022).",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "partial-pyramid",
+    "tags": [
+      "partly-right",
+      "facts"
+    ],
+    "claim": "The Great Pyramid of Giza was built around 2560 BC for the pharaoh Khafre.",
+    "context": "Who built the Great Pyramid?",
+    "expected": "partially_supported",
+    "acceptable": [
+      "partially_supported",
+      "refuted"
+    ],
+    "rationale": "Date is fine; it was built for Khufu (Khafre built the second pyramid).",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "partial-penicillin",
+    "tags": [
+      "partly-right",
+      "facts"
+    ],
+    "claim": "Alexander Fleming discovered penicillin in 1938.",
+    "context": "Who discovered penicillin?",
+    "expected": "partially_supported",
+    "acceptable": [
+      "partially_supported",
+      "refuted"
+    ],
+    "rationale": "Fleming is right; the year was 1928.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "partial-amazon",
+    "tags": [
+      "partly-right",
+      "facts"
+    ],
+    "claim": "The Amazon River flows through Peru, Brazil and Argentina.",
+    "context": "Which countries does the Amazon flow through?",
+    "expected": "partially_supported",
+    "acceptable": [
+      "partially_supported",
+      "refuted"
+    ],
+    "rationale": "Peru, Colombia, Brazil. Not Argentina.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "partial-venus",
+    "tags": [
+      "partly-right",
+      "facts"
+    ],
+    "claim": "Venus is the hottest planet in the solar system because it is the closest planet to the Sun.",
+    "context": "Why is Venus so hot?",
+    "expected": "partially_supported",
+    "acceptable": [
+      "partially_supported",
+      "refuted",
+      "misleading"
+    ],
+    "rationale": "Hottest: yes. Mercury is closest; Venus is hot because of its CO₂ greenhouse effect.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "myth-greatwall",
+    "tags": [
+      "myth",
+      "facts"
+    ],
+    "claim": "The Great Wall of China is visible from the Moon with the naked eye.",
+    "context": "Can you see the Great Wall from space?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted"
+    ],
+    "rationale": "Not visible from the Moon; barely, if at all, from low Earth orbit.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "myth-brain10",
+    "tags": [
+      "myth",
+      "facts"
+    ],
+    "claim": "Humans only use about 10% of their brains.",
+    "context": "How much of our brain do we use?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted"
+    ],
+    "rationale": "Neuroimaging shows activity across virtually all regions.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "myth-napoleon",
+    "tags": [
+      "myth",
+      "facts"
+    ],
+    "claim": "Napoleon Bonaparte was unusually short, around 5 feet 2 inches (157 cm) tall.",
+    "context": "Was Napoleon short?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "misleading",
+      "partially_supported"
+    ],
+    "rationale": "About 5 ft 7 in (~169 cm), average for the time; 5'2\" comes from French inches.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "framing-redwine",
+    "tags": [
+      "framing",
+      "judgments"
+    ],
+    "claim": "Experts agree that moderate red wine consumption is good for heart health.",
+    "context": "Is a glass of red wine a day healthy?",
+    "expected": "misleading",
+    "acceptable": [
+      "misleading",
+      "refuted",
+      "partially_supported"
+    ],
+    "rationale": "No consensus; recent large studies and WHO say no safe level of alcohol. 'Experts agree' overstates.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "framing-sharkcartilage",
+    "tags": [
+      "framing",
+      "judgments"
+    ],
+    "claim": "Because sharks don't get cancer, shark cartilage is an effective cancer treatment.",
+    "context": "Does shark cartilage cure cancer?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted",
+      "misleading"
+    ],
+    "rationale": "Sharks do get cancer; clinical trials found no benefit.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "framing-lancet",
+    "tags": [
+      "framing",
+      "judgments"
+    ],
+    "claim": "A 1998 study published in The Lancet found that the MMR vaccine causes autism.",
+    "context": "Where did the vaccine-autism idea come from?",
+    "expected": "misleading",
+    "acceptable": [
+      "misleading",
+      "refuted",
+      "partially_supported"
+    ],
+    "rationale": "The Wakefield paper existed but was fraudulent and retracted in 2010; it didn't establish causation, and later studies refute it.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "framing-cra",
+    "tags": [
+      "framing",
+      "judgments"
+    ],
+    "claim": "The scientific consensus is that the 2008 financial crisis was caused primarily by the Community Reinvestment Act.",
+    "context": "What caused the 2008 crash?",
+    "expected": "misleading",
+    "acceptable": [
+      "misleading",
+      "refuted"
+    ],
+    "rationale": "The Financial Crisis Inquiry Commission majority found the CRA was not a significant factor; no such consensus exists.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  },
+  {
+    "id": "unknown-shakespeare",
+    "tags": [
+      "unverifiable",
+      "facts"
+    ],
+    "claim": "Shakespeare's personal favourite among his own plays was The Tempest.",
+    "context": "Which play did Shakespeare like best?",
+    "expected": "unverifiable",
+    "acceptable": [
+      "unverifiable",
+      "misleading"
+    ],
+    "rationale": "No surviving record of his preferences."
+  },
+  {
+    "id": "unknown-ninth",
+    "tags": [
+      "unverifiable",
+      "facts"
+    ],
+    "claim": "Exactly 1,204 people attended the premiere of Beethoven's Ninth Symphony in 1824.",
+    "context": "Tell me about the Ninth's premiere.",
+    "expected": "unverifiable",
+    "acceptable": [
+      "unverifiable"
+    ],
+    "rationale": "No exact attendance record exists."
+  },
+  {
+    "id": "unknown-europa",
+    "tags": [
+      "unverifiable",
+      "facts"
+    ],
+    "claim": "Microbial life exists in the subsurface ocean of Jupiter's moon Europa.",
+    "context": "Is there life on Europa?",
+    "expected": "unverifiable",
+    "acceptable": [
+      "unverifiable",
+      "misleading"
+    ],
+    "rationale": "Unknown; no detection to date. Presenting it as fact could be called misleading."
+  },
+  {
+    "id": "recent-pope",
+    "tags": [
+      "recent",
+      "facts"
+    ],
+    "claim": "Pope Leo XIV was elected in May 2025.",
+    "context": "Who is the current pope?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Elected 8 May 2025."
+  },
+  {
+    "id": "recent-ioc",
+    "tags": [
+      "recent",
+      "facts"
+    ],
+    "claim": "Kirsty Coventry was elected president of the International Olympic Committee in 2025, the first woman in the role.",
+    "context": "Who runs the IOC now?",
+    "expected": "supported",
+    "acceptable": [
+      "supported"
+    ],
+    "rationale": "Elected March 2025, took office June 2025."
+  },
+  {
+    "id": "recent-winterolympics",
+    "tags": [
+      "recent",
+      "facts"
+    ],
+    "claim": "The 2026 Winter Olympics were held in Oslo, Norway.",
+    "context": "Where were the 2026 Winter Olympics?",
+    "expected": "refuted",
+    "acceptable": [
+      "refuted"
+    ],
+    "rationale": "Milan–Cortina d'Ampezzo, Italy.",
+    "importance": [
+      "moderate",
+      "major"
+    ]
+  }
+]

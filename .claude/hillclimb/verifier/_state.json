@@ -1,0 +1,17 @@
+{
+  "metrics": [
+    { "id": "display_ok", "label": "Shown right", "kind": "binary" },
+    { "id": "correct", "label": "Verdict", "kind": "binary" },
+    { "id": "caught", "label": "Caught", "kind": "binary" },
+    { "id": "quiet", "label": "Quiet", "kind": "binary" }
+  ],
+  "perf_fields": [
+    { "id": "cost_usd", "label": "Cost", "unit": "$" },
+    { "id": "latency_s", "label": "Latency", "unit": "s" },
+    { "id": "web_searches", "label": "Searches" },
+    { "id": "sources_cited", "label": "Sources" },
+    { "id": "sources_unretrieved", "label": "Unretrieved" }
+  ],
+  "prices": { "claude-haiku-5-5": { "in": 0.1, "out": 0.5 }, "claude-sonnet-5-5": { "in": 2, "out": 10 } },
+  "harness_paths": ["eval/verifier/cases.json", "lib/factcheck.ts", "lib/prompts.ts", "lib/db.ts", "lib/sources.ts"]
+}

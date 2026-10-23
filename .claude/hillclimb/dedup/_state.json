@@ -1,0 +1,60 @@
+{
+  "metrics": [
+    {
+      "id": "dedup_ok",
+      "label": "Right call",
+      "kind": "binary"
+    },
+    {
+      "id": "safe",
+      "label": "No wrong merge",
+      "kind": "binary"
+    },
+    {
+      "id": "merged",
+      "label": "Duplicate found",
+      "kind": "binary"
+    }
+  ],
+  "perf_fields": [
+    {
+      "id": "cost_usd",
+      "label": "Cost",
+      "unit": "$"
+    },
+    {
+      "id": "latency_s",
+      "label": "Latency",
+      "unit": "s"
+    },
+    {
+      "id": "claims_extracted",
+      "label": "Claims"
+    },
+    {
+      "id": "merges",
+      "label": "Merges"
+    },
+    {
+      "id": "related_links",
+      "label": "Related"
+    }
+  ],
+  "prices": {
+    "claude-haiku-5-5": {
+      "in": 0.1,
+      "out": 0.5
+    },
+    "claude-sonnet-5-5": {
+      "in": 2,
+      "out": 10
+    }
+  },
+  "harness_paths": [
+    "eval/dedup/cases.json",
+    "lib/factcheck.ts",
+    "lib/prompts.ts",
+    "lib/db.ts"
+  ],
+  "harness_sha": "a934b3c60645aeba0851cf31ce70e0b2cd20bc1900c649c4f2644bb86a33745e"
+}
