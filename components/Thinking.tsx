@@ -3,6 +3,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { ToolActivity } from "@/lib/types";
+import { modelLabel } from "@/lib/models";
 import { hostname } from "./status";
 
 /** The latest heading the summary gave (summaries often start sections with **a title**), else its last line. */
@@ -31,10 +32,13 @@ export function Thinking({
   text,
   activity,
   active,
+  model,
 }: {
   text: string;
   activity: ToolActivity[];
   active: boolean;
+  /** The model that wrote this answer. */
+  model: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const last = activity[activity.length - 1];
@@ -50,9 +54,7 @@ export function Thinking({
     ? last && last.at >= text.length
       ? "Working"
       : "Thinking"
-    : [text ? "Thoughts" : null, ...tools]
-        .filter(Boolean)
-        .join(" \u00b7 ");
+    : [text ? "Thoughts" : null, ...tools].filter(Boolean).join(" \u00b7 ") || "Details";
 
   return (
     <div className={`thinking${open ? " is-open" : ""}`}>
@@ -64,6 +66,7 @@ export function Thinking({
       </button>
       {open && (
         <div className="thinking__body">
+          {model && <p className="thinking__model">Answered by {modelLabel(model)}</p>}
           {text && <ReactMarkdown>{text}</ReactMarkdown>}
           {activity.length > 0 && (
             <ul className="activity">

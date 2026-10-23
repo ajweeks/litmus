@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ChatSummary, Claim, ClaimCategory, ClaimStatus, Importance } from "@/lib/types";
 import { isReusable } from "@/lib/types";
 import { Bold } from "@/components/Bold";
@@ -37,6 +38,12 @@ const EMPTY: Filters = {
   id: "",
 };
 
+/** The chat this page was opened from (only same-site paths), else the start page. */
+function backTo(): string {
+  const from = new URLSearchParams(location.search).get("from") ?? "";
+  return from.startsWith("/") && !from.startsWith("//") ? from : "/";
+}
+
 /** Whether a verdict is still current, and whether later chats may reuse it. */
 function freshness(c: Claim): { label: string; title: string } {
   if (c.supersededBy) return { label: "replaced", title: `Superseded by ${c.supersededBy}` };
@@ -55,6 +62,22 @@ export default function ClaimsPage() {
   const [f, setF] = useState<Filters>(EMPTY);
   const [open, setOpen] = useState<string | null>(null);
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setF((prev) => ({ ...prev, [k]: v }));
+  const router = useRouter();
+  /** Where "← chat" and Esc go; read after mount, since the page is prerendered. */
+  const [back, setBack] = useState("/");
+  useEffect(() => setBack(backTo()), []);
+
+  // Esc goes back to the chat, unless it's clearing a search box that still has text in it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLInputElement | null;
+      if (t?.tagName === "INPUT" && t.value) return;
+      router.push(back);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [router, back]);
 
   useEffect(() => {
     const id = new URLSearchParams(location.search).get("id");
@@ -117,7 +140,7 @@ export default function ClaimsPage() {
   return (
     <div className="dbpage">
       <header className="dbpage__head">
-        <Link href="/" className="muted">
+        <Link href={back} className="muted">
           ← chat
         </Link>
         <h1>Claims database</h1>

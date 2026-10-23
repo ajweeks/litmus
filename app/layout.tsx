@@ -8,7 +8,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "fact/check",
+  title: "litmus",
   description: "Chat with an AI while a second model checks its claims against primary sources.",
 };
 

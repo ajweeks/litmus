@@ -1,5 +1,5 @@
 {
-  "name": "fact-checker",
+  "name": "litmus",
   "version": "0.1.0",
   "private": true,
   "description": "A chat UI that fact-checks the main model's claims in the background with a cheaper model and primary sources.",
@@ -16,6 +16,7 @@
     "@fontsource/ibm-plex-sans": "^5.3.0",
     "better-sqlite3": "^13.0.3",
     "next": "^16.4.2",
+    "nodemailer": "^10.2.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
@@ -26,6 +27,7 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/hast": "^3.0.5",
     "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "tsx": "^4.23.15",

@@ -2,7 +2,9 @@
 
 import type { ChatDetail, Settings, StreamEvent } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+import { clearAll as clearChats } from "./chatStore";
 import type { ApiKeys, Provider } from "./providers";
+import { enabledKeys } from "./providers";
 
 // API keys live only in this browser's localStorage and are sent with each request.
 const KEYS_STORAGE = "factcheck.keys";
@@ -63,13 +65,29 @@ export function loadSettings(): Settings {
 }
 export const saveSettings = (s: Settings) => write(SETTINGS_STORAGE, JSON.stringify(s));
 
-/** One header per stored key: x-key-anthropic, x-key-openai, ... */
+const SIDEBAR_STORAGE = "factcheck.sidebar";
+export function loadSidebar(): { width: number; collapsed: boolean } {
+  try {
+    const v = JSON.parse(read(SIDEBAR_STORAGE) ?? "{}");
+    return { width: Number(v.width) || 236, collapsed: !!v.collapsed };
+  } catch {
+    return { width: 236, collapsed: false };
+  }
+}
+export const saveSidebar = (v: { width: number; collapsed: boolean }) => write(SIDEBAR_STORAGE, JSON.stringify(v));
+
+/** One header per stored, switched-on key: x-key-anthropic, x-key-openai, ... */
 export function authHeaders(): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(loadKeys())
-      .filter(([, k]) => k)
-      .map(([p, k]) => [`x-key-${p}`, k!]),
+    Object.entries(enabledKeys(loadKeys(), loadSettings().disabledKeys)).map(([p, k]) => [`x-key-${p}`, k!]),
   );
+}
+
+/** Forget this browser's keys and settings, and optionally every saved chat. */
+export async function clearLocalData(opts: { chats: boolean }) {
+  for (const k of [KEYS_STORAGE, SETTINGS_STORAGE, SIDEBAR_STORAGE, KEY_FAILURES_STORAGE, ...LEGACY_KEYS.map(([name]) => name)])
+    write(k, null);
+  if (opts.chats) await clearChats();
 }
 
 /**
@@ -86,12 +104,19 @@ export function chatPayload(d: ChatDetail) {
 }
 
 /** POST /api/chat and call `onEvent` for each NDJSON event until the stream ends. */
-export async function streamChat(
+export const streamChat = (
   body: ReturnType<typeof chatPayload> & { content?: string; correctionRequest?: boolean; settings: Settings },
   onEvent: (e: StreamEvent) => void,
-  signal?: AbortSignal,
-) {
-  const res = await fetch("/api/chat", {
+) => streamEvents("/api/chat", body, onEvent);
+
+/** POST /api/check: retry fact-checking one answer, with the same events as the chat stream. */
+export const streamCheck = (
+  body: ReturnType<typeof chatPayload> & { messageId: string; reextract: boolean; settings: Settings },
+  onEvent: (e: StreamEvent) => void,
+) => streamEvents("/api/check", body, onEvent);
+
+async function streamEvents(url: string, body: object, onEvent: (e: StreamEvent) => void, signal?: AbortSignal) {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
@@ -115,4 +140,31 @@ export async function streamChat(
       if (line) onEvent(JSON.parse(line) as StreamEvent);
     }
   }
+}
+
+// ---------- keys that didn't work ----------
+
+const KEY_FAILURES_STORAGE = "factcheck.keyFailures";
+
+/** Providers whose key was last rejected, with why and when. Cleared when the key next works. */
+export type KeyFailures = Partial<Record<Provider, { message: string; at: number }>>;
+
+export function loadKeyFailures(): KeyFailures {
+  try {
+    return JSON.parse(read(KEY_FAILURES_STORAGE) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+export function saveKeyFailures(f: KeyFailures) {
+  write(KEY_FAILURES_STORAGE, Object.keys(f).length ? JSON.stringify(f) : null);
+}
+
+/** Apply a key status from the server to the stored failures. */
+export function withKeyStatus(f: KeyFailures, s: { provider: Provider; ok: boolean; message?: string }): KeyFailures {
+  const next = { ...f };
+  if (s.ok) delete next[s.provider];
+  else next[s.provider] = { message: s.message ?? "The key was rejected.", at: Date.now() };
+  return next;
 }

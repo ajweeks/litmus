@@ -6,7 +6,7 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
     <div className="overlay" onClick={onClose}>
       <div className="dialog about" role="dialog" aria-labelledby="about-title" onClick={(e) => e.stopPropagation()}>
         <h2 id="about-title">
-          fact<b>/</b>check
+          litmus
         </h2>
         <p>
           This tool was built by AJ Weeks as a way to automate fact-checking LLM responses, for more reliable answers.

@@ -2,7 +2,7 @@
 // Search grounding, URL context and code execution; structured completions; web research.
 
 import { priceOf } from "../models";
-import { ensureOk, readSse } from "../sse";
+import { providerFetch, readSse } from "../sse";
 import type { ToolActivity } from "../types";
 import type { CompleteArgs, CompleteResult, ReplyArgs, ReplyResult, ResearchArgs, ResearchResult, Usage } from "./types";
 
@@ -45,11 +45,11 @@ function toUsage(model: string, u: Chunk["usageMetadata"], queries: number): Usa
 }
 
 const call = (key: string, model: string, method: string, body: object) =>
-  fetch(`${BASE}/${encodeURIComponent(model)}:${method}`, {
+  providerFetch("Gemini", `${BASE}/${encodeURIComponent(model)}:${method}`, {
     method: "POST",
     headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  }).then((res) => ensureOk(res, "Gemini"));
+  });
 
 const system = (text: string) => ({ systemInstruction: { parts: [{ text }] } });
 
@@ -69,7 +69,7 @@ export async function streamGeminiReply(a: ReplyArgs): Promise<ReplyResult> {
   let blocked = false;
   let usage: Chunk["usageMetadata"];
 
-  for await (const chunk of readSse<Chunk>(res)) {
+  for await (const chunk of readSse<Chunk>(res, "Gemini")) {
     if (chunk.promptFeedback?.blockReason) blocked = true;
     if (chunk.usageMetadata) usage = chunk.usageMetadata;
     const cand = chunk.candidates?.[0];

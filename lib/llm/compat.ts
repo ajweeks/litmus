@@ -1,23 +1,24 @@
-// DeepSeek and Z.ai (GLM) through their OpenAI-style chat completions APIs (plain fetch).
+// DeepSeek, Z.ai (GLM) and NVIDIA NIM through their OpenAI-style chat completions APIs (plain fetch).
 //
 // Z.ai runs web search itself (a built-in `web_search` tool whose results come back beside the
 // reply). DeepSeek has no built-in search in chat, but sells Search and Fetch endpoints on the same
 // key, so it gets them as ordinary function tools that this module runs between turns.
 
 import { priceOf } from "../models";
-import { ensureOk, readSse } from "../sse";
+import { providerFetch, readSse } from "../sse";
 import type { ToolActivity } from "../types";
 import type { CompleteArgs, CompleteResult, ReplyArgs, ReplyResult, ResearchArgs, ResearchResult, Usage } from "./types";
 import { addUsage, NO_USAGE } from "./types";
 
-type CompatProvider = "deepseek" | "zai";
+export type CompatProvider = "deepseek" | "zai" | "nvidia";
 
 const CHAT_URL: Record<CompatProvider, string> = {
   deepseek: "https://api.deepseek.com/chat/completions",
   zai: "https://api.z.ai/api/paas/v4/chat/completions",
+  nvidia: "https://integrate.api.nvidia.com/v1/chat/completions",
 };
-const LABEL: Record<CompatProvider, string> = { deepseek: "DeepSeek", zai: "Z.ai" };
-const SEARCH_USD: Record<CompatProvider, number> = { deepseek: 0.00075, zai: 0.01 };
+const LABEL: Record<CompatProvider, string> = { deepseek: "DeepSeek", zai: "Z.ai", nvidia: "NVIDIA" };
+const SEARCH_USD: Record<CompatProvider, number> = { deepseek: 0.00075, zai: 0.01, nvidia: 0 };
 const FETCH_USD = 0.00075; // DeepSeek Fetch, per page
 const MAX_ROUNDS = 8;
 
@@ -61,11 +62,11 @@ function toUsage(model: string, u: CompatUsage | undefined): Usage {
 }
 
 const post = (provider: CompatProvider, key: string, url: string, body: object) =>
-  fetch(url, {
+  providerFetch(LABEL[provider], url, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  }).then((res) => ensureOk(res, LABEL[provider]));
+  });
 
 // ---------- DeepSeek's search and fetch, as function tools ----------
 
@@ -145,6 +146,8 @@ async function runDeepSeekTool(key: string, call: ToolCall, at: number): Promise
 // ---------- requests ----------
 
 function requestBody(provider: CompatProvider, model: string, messages: Message[], tools: boolean, effort: "low" | "high") {
+  // NIM hosts many model families with different reasoning switches and no search: send neither.
+  if (provider === "nvidia") return { model, messages };
   return {
     model,
     messages,
@@ -181,7 +184,7 @@ export async function streamCompatReply(provider: CompatProvider, a: ReplyArgs):
     const res = await post(provider, a.key, CHAT_URL[provider], {
       ...requestBody(provider, a.model, messages, a.tools, "high"),
       stream: true,
-      ...(provider === "deepseek" ? { stream_options: { include_usage: true } } : {}),
+      ...(provider !== "zai" ? { stream_options: { include_usage: true } } : {}),
     });
     let content = "";
     let reasoning = "";
@@ -199,7 +202,7 @@ export async function streamCompatReply(provider: CompatProvider, a: ReplyArgs):
       usage?: CompatUsage | null;
       web_search?: WebResult[];
     };
-    for await (const chunk of readSse<Chunk>(res)) {
+    for await (const chunk of readSse<Chunk>(res, LABEL[provider])) {
       if (chunk.usage) usage = addUsage(usage, toUsage(a.model, chunk.usage));
       if (chunk.web_search?.length) {
         activity.push(zaiSearch(chunk.web_search, thinkingLength));
@@ -269,7 +272,7 @@ export async function completeCompat(provider: CompatProvider, a: CompleteArgs):
   };
 }
 
-export async function researchCompat(provider: CompatProvider, a: ResearchArgs): Promise<ResearchResult> {
+export async function researchCompat(provider: "deepseek" | "zai", a: ResearchArgs): Promise<ResearchResult> {
   const messages: Message[] = [
     { role: "system", content: a.system },
     { role: "user", content: a.user },

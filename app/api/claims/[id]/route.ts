@@ -41,7 +41,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const result = await verifyClaim({ llm, model, claim, context, force: true });
     // The verdict changed, so the message's digest may be stale.
     await summarizeMessage({ llm, model, messageId: claim.messageId, minImportance });
-    return Response.json({ claim: result, message: db.getMessage(claim.messageId) });
+    return Response.json({ claim: result, message: db.getMessage(claim.messageId), keyStatus: llm.statuses() });
   } finally {
     releaseChat(payload.chat.id);
   }

@@ -1,13 +1,58 @@
-// OpenAI via the Responses API (plain fetch): streamed replies with reasoning summaries, web search
-// and code interpreter; structured completions; and web research for the verifier.
+// The Responses API (plain fetch), as offered by OpenAI, xAI and Alibaba Model Studio: streamed
+// replies with reasoning summaries, web search and code; structured completions; web research for
+// the verifier. The three differ in a few options, set per provider below.
 
 import { priceOf } from "../models";
-import { ensureOk, readSse } from "../sse";
+import { providerFetch, readSse } from "../sse";
 import type { ToolActivity } from "../types";
 import type { CompleteArgs, CompleteResult, ReplyArgs, ReplyResult, ResearchArgs, ResearchResult, Usage } from "./types";
 
-const URL = "https://api.openai.com/v1/responses";
-const WEB_SEARCH_USD = 0.01; // per call
+export type ResponsesProvider = "openai" | "xai" | "alibaba";
+
+const CONFIG: Record<
+  ResponsesProvider,
+  {
+    label: string;
+    url: string;
+    /** USD per web search call. */
+    searchUsd: number;
+    /** Accepts `store`, `max_tool_calls` and `include: ["web_search_call.action.sources"]`. */
+    openAiExtras: boolean;
+    /** Takes a JSON schema for structured output; otherwise the schema goes in the prompt. */
+    schemaFormat: boolean;
+    /** The reasoning settings to send, if any (some models reject a summary request). */
+    reasoning: (model: string, effort: "low" | "medium") => object | undefined;
+  }
+> = {
+  openai: {
+    label: "OpenAI",
+    url: "https://api.openai.com/v1/responses",
+    searchUsd: 0.01,
+    openAiExtras: true,
+    schemaFormat: true,
+    reasoning: (_, effort) => ({ effort, summary: "auto" }),
+  },
+  xai: {
+    label: "xAI",
+    url: "https://api.x.ai/v1/responses",
+    searchUsd: 0.005,
+    openAiExtras: false,
+    schemaFormat: true,
+    // Grok always reasons; only grok-4.7 returns a summary.
+    reasoning: (model, effort) => (/^grok-4\.7/.test(model) ? { effort, summary: "auto" } : { effort }),
+  },
+  alibaba: {
+    label: "Alibaba Cloud",
+    // International (Singapore) endpoint: keys only work in the region that issued them.
+    url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/responses",
+    searchUsd: 0.01,
+    openAiExtras: false,
+    // JSON schemas aren't supported in the Singapore region yet.
+    schemaFormat: false,
+    // Effort levels vary by Qwen model, so leave each on its default.
+    reasoning: () => undefined,
+  },
+};
 
 interface OpenAiUsage {
   input_tokens: number;
@@ -29,26 +74,32 @@ interface ResponseBody {
   usage?: OpenAiUsage;
   error?: { message?: string } | null;
   incomplete_details?: { reason?: string } | null;
+  citations?: string[];
 }
 
-function toUsage(model: string, u: OpenAiUsage | undefined, searches: number): Usage {
-  if (!u) return { inputTokens: 0, outputTokens: 0, searches, costUsd: searches * WEB_SEARCH_USD };
+function toUsage(provider: ResponsesProvider, model: string, u: OpenAiUsage | undefined, searches: number): Usage {
+  const searchUsd = CONFIG[provider].searchUsd;
+  if (!u) return { inputTokens: 0, outputTokens: 0, searches, costUsd: searches * searchUsd };
   const p = priceOf(model);
   const cached = u.input_tokens_details?.cached_tokens ?? 0;
   const written = u.input_tokens_details?.cache_write_tokens ?? 0;
   const fresh = u.input_tokens - cached - written;
   const costUsd =
     (fresh * p.input + written * p.input * 1.25 + cached * (p.cachedInput ?? p.input * 0.1) + u.output_tokens * p.output) / 1e6 +
-    searches * WEB_SEARCH_USD;
+    searches * searchUsd;
   return { inputTokens: u.input_tokens, outputTokens: u.output_tokens, searches, costUsd };
 }
 
-const post = (key: string, body: object) =>
-  fetch(URL, {
+const post = (provider: ResponsesProvider, key: string, body: object) =>
+  providerFetch(CONFIG[provider].label, CONFIG[provider].url, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  }).then((res) => ensureOk(res, "OpenAI"));
+  });
+
+/** Options only OpenAI accepts: don't store the response, and return each search's sources. */
+const extras = (provider: ResponsesProvider, more: object = {}) =>
+  CONFIG[provider].openAiExtras ? { store: false, include: ["web_search_call.action.sources"], ...more } : {};
 
 /** What a tool call item did, as one activity line (query, page or first line of code). */
 function describe(item: OutputItem, at: number): ToolActivity | null {
@@ -67,18 +118,18 @@ function describe(item: OutputItem, at: number): ToolActivity | null {
 
 const isSearch = (item: OutputItem) => item.type === "web_search_call" && (item.action?.type ?? "search") === "search";
 
-export async function streamOpenAiReply(a: ReplyArgs): Promise<ReplyResult> {
-  const res = await post(a.key, {
+export async function streamResponsesReply(provider: ResponsesProvider, a: ReplyArgs): Promise<ReplyResult> {
+  const reasoning = CONFIG[provider].reasoning(a.model, "medium");
+  const res = await post(provider, a.key, {
     model: a.model,
     instructions: a.system,
     input: a.history.map((t) => ({ role: t.role, content: t.content })),
     stream: true,
-    store: false,
-    reasoning: { effort: "medium", summary: "auto" },
+    ...(reasoning ? { reasoning } : {}),
     ...(a.tools
       ? {
           tools: [{ type: "web_search" }, { type: "code_interpreter", container: { type: "auto" } }],
-          include: ["web_search_call.action.sources"],
+          ...extras(provider),
         }
       : {}),
   });
@@ -89,7 +140,7 @@ export async function streamOpenAiReply(a: ReplyArgs): Promise<ReplyResult> {
   let wroteText = false;
   let refused = false;
   let searches = 0;
-  let usage: Usage = toUsage(a.model, undefined, 0);
+  let usage: Usage = toUsage(provider, a.model, undefined, 0);
 
   type Event = {
     type: string;
@@ -99,13 +150,14 @@ export async function streamOpenAiReply(a: ReplyArgs): Promise<ReplyResult> {
     response?: ResponseBody;
     message?: string;
   };
-  for await (const e of readSse<Event>(res)) {
+  for await (const e of readSse<Event>(res, CONFIG[provider].label)) {
     switch (e.type) {
       case "response.reasoning_summary_part.added":
         // Separate summary parts the way the model separates paragraphs.
         if (e.summary_index && thinkingLength) a.onThinking("\n\n");
         break;
       case "response.reasoning_summary_text.delta":
+      case "response.reasoning_text.delta":
         thinkingLength += e.delta?.length ?? 0;
         a.onThinking(e.delta ?? "");
         break;
@@ -133,12 +185,12 @@ export async function streamOpenAiReply(a: ReplyArgs): Promise<ReplyResult> {
       }
       case "response.completed":
       case "response.incomplete":
-        usage = toUsage(a.model, e.response?.usage, searches);
+        usage = toUsage(provider, a.model, e.response?.usage, searches);
         break;
       case "response.failed":
-        throw new Error(`OpenAI: ${e.response?.error?.message ?? "the response failed"}`);
+        throw new Error(`${CONFIG[provider].label}: ${e.response?.error?.message ?? "the response failed"}`);
       case "error":
-        throw new Error(`OpenAI: ${e.message ?? "stream error"}`);
+        throw new Error(`${CONFIG[provider].label}: ${e.message ?? "stream error"}`);
     }
   }
   a.onUsage?.(usage);
@@ -154,36 +206,43 @@ const outputText = (body: ResponseBody) =>
 const refusedIn = (body: ResponseBody) =>
   (body.output ?? []).some((o) => o.content?.some((c) => c.type === "refusal"));
 
-export async function completeOpenAi(a: CompleteArgs): Promise<CompleteResult> {
+export async function completeResponses(provider: ResponsesProvider, a: CompleteArgs): Promise<CompleteResult> {
+  const cfg = CONFIG[provider];
+  const reasoning = cfg.reasoning(a.model, "low");
+  const schemaInPrompt = a.schema && !cfg.schemaFormat;
   const body = (await (
-    await post(a.key, {
+    await post(provider, a.key, {
       model: a.model,
-      instructions: a.system,
+      instructions: schemaInPrompt
+        ? `${a.system}\n\nReply with only a JSON object matching this JSON Schema:\n${JSON.stringify(a.schema!.schema)}`
+        : a.system,
       input: a.user,
-      store: false,
       max_output_tokens: a.maxTokens,
-      reasoning: { effort: "low" },
-      ...(a.schema ? { text: { format: { type: "json_schema", name: a.schema.name, schema: a.schema.schema, strict: true } } } : {}),
+      ...(reasoning ? { reasoning } : {}),
+      ...(cfg.openAiExtras ? { store: false } : {}),
+      ...(a.schema && cfg.schemaFormat
+        ? { text: { format: { type: "json_schema", name: a.schema.name, schema: a.schema.schema, strict: true } } }
+        : {}),
     })
   ).json()) as ResponseBody;
-  return { text: outputText(body), usage: toUsage(a.model, body.usage, 0), refused: refusedIn(body) };
+  return { text: outputText(body), usage: toUsage(provider, a.model, body.usage, 0), refused: refusedIn(body) };
 }
 
-export async function researchOpenAi(a: ResearchArgs): Promise<ResearchResult> {
+export async function researchResponses(provider: ResponsesProvider, a: ResearchArgs): Promise<ResearchResult> {
+  const reasoning = CONFIG[provider].reasoning(a.model, "low");
   const body = (await (
-    await post(a.key, {
+    await post(provider, a.key, {
       model: a.model,
       instructions: a.system,
       input: a.user,
-      store: false,
-      reasoning: { effort: "low" },
+      ...(reasoning ? { reasoning } : {}),
       tools: [{ type: "web_search" }],
-      max_tool_calls: a.maxSearches,
-      include: ["web_search_call.action.sources"],
+      ...extras(provider, { max_tool_calls: a.maxSearches }),
     })
   ).json()) as ResponseBody;
 
-  const retrievedUrls = new Set<string>();
+  // xAI also lists every URL it used in a top-level `citations` array.
+  const retrievedUrls = new Set<string>(body.citations ?? []);
   for (const o of body.output ?? []) {
     for (const s of o.action?.sources ?? []) retrievedUrls.add(s.url);
     if (o.action?.url) retrievedUrls.add(o.action.url);
@@ -195,6 +254,6 @@ export async function researchOpenAi(a: ResearchArgs): Promise<ResearchResult> {
     retrievedUrls,
     // The Responses API cites URLs but doesn't quote the page text.
     citedText: new Map(),
-    usage: toUsage(a.model, body.usage, searches),
+    usage: toUsage(provider, a.model, body.usage, searches),
   };
 }

@@ -6,13 +6,14 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import * as db from "./db";
 import { estimateCost, inputTokens, webSearchTool } from "./anthropic";
-import { complete, describeError, Llm, research } from "./llm";
+import { complete, describeError, generateText, Llm, research } from "./llm";
 import { providerOf } from "./models";
 import {
   extractorSystem,
   extractorUser,
   SUMMARY_SYSTEM,
   summaryUser,
+  TITLE_SYSTEM,
   VERDICT_RECORD_SYSTEM,
   verdictRecordUser,
   verifierSystem,
@@ -20,7 +21,7 @@ import {
 } from "./prompts";
 import { verbatimQuote } from "./sources";
 import { locate } from "./text";
-import { triageClaim } from "./triage";
+import { triageClaim, triageProvider } from "./triage";
 import type { Claim, ClaimStatus, Importance, Source, Strictness, Volatility } from "./types";
 import { isNotableProblem, isReusable, VOLATILITY_TTL_MS } from "./types";
 
@@ -79,7 +80,12 @@ export interface ExtractArgs extends WithLlm {
   passage: string;
   /** Offset of `passage` within the full message text. */
   passageOffset: number;
+  /** Quotes already extracted from this message (when retrying): claims for them are skipped. */
+  skipQuotes?: Set<string>;
 }
+
+/** A quote reduced to its words, for spotting the same span extracted twice. */
+export const quoteKey = (q: string) => q.toLowerCase().replace(/\s+/g, " ").trim();
 
 export async function extractClaims(a: ExtractArgs): Promise<Claim[]> {
   const chatClaims = db.listClaims({ chatId: a.chatId }).map((c) => ({ id: c.id, claim: c.claim }));
@@ -116,6 +122,7 @@ export async function extractClaims(a: ExtractArgs): Promise<Claim[]> {
 
   const claims: Claim[] = [];
   for (const item of items) {
+    if (a.skipQuotes?.has(quoteKey(item.quote))) continue;
     const at = locate(a.passage, item.quote);
     const duplicateOf = item.duplicate_of && knownIds.has(item.duplicate_of) ? item.duplicate_of : null;
     const claim = db.insertClaim({
@@ -135,8 +142,10 @@ export async function extractClaims(a: ExtractArgs): Promise<Claim[]> {
     claims.push(claim);
   }
 
-  // Split the extraction call's cost evenly across the claims it produced.
-  spreadUsage(claims, usage.input, usage.output, usage.cost);
+  // Split the extraction call's cost evenly across the claims it produced, or put it on the
+  // message when there were none (so it still shows up in the usage meter).
+  if (claims.length) spreadUsage(claims, usage.input, usage.output, usage.cost);
+  else db.addCheckUsage(a.messageId, usage.input + usage.output, usage.cost);
   return claims.map((c) => db.getClaim(c.id)!);
 }
 
@@ -393,27 +402,15 @@ export async function summarizeMessage(opts: WithLlm & {
     return null;
   }
   try {
-    let text: string;
-    let refused: boolean;
-    if (providerOf(opts.model) === "anthropic") {
-      const res = await llmOf(opts).anthropic().messages.create({
-        model: opts.model,
-        max_tokens: 2000,
-        output_config: { effort: "low" },
-        system: SUMMARY_SYSTEM,
-        messages: [{ role: "user", content: summaryUser(problems) }],
-      });
-      db.addCheckUsage(opts.messageId, inputTokens(res.usage) + res.usage.output_tokens, estimateCost(opts.model, res.usage));
-      text = res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ");
-      refused = res.stop_reason === "refusal";
-    } else {
-      const res = await complete(llmOf(opts), { model: opts.model, system: SUMMARY_SYSTEM, user: summaryUser(problems), maxTokens: 2000 });
-      db.addCheckUsage(opts.messageId, res.usage.inputTokens + res.usage.outputTokens, res.usage.costUsd);
-      text = res.text;
-      refused = res.refused;
-    }
-    text = text.replace(/\s+/g, " ").trim();
-    if (refused || !text) return null;
+    const res = await generateText(llmOf(opts), {
+      model: opts.model,
+      system: SUMMARY_SYSTEM,
+      user: summaryUser(problems),
+      maxTokens: 2000,
+    });
+    db.addCheckUsage(opts.messageId, res.usage.inputTokens + res.usage.outputTokens, res.usage.costUsd);
+    const text = res.text.replace(/\s+/g, " ").trim();
+    if (res.refused || !text) return null;
     db.setCheckSummary(opts.messageId, text);
     return text;
   } catch (err) {
@@ -445,7 +442,8 @@ export interface TriageConfig {
   model: string;
   threshold: number;
   auditRate: number;
-  openrouterKey: string | null;
+  /** Key for the triage model's service (OpenRouter or TypeSafe). */
+  key: string | null;
 }
 
 /**
@@ -453,16 +451,25 @@ export interface TriageConfig {
  * `auditRate` share of would-be-skipped claims is checked anyway, which over time measures how
  * well the model's probabilities predict the real verdict. Returns the claims still to check.
  */
-async function triage(cfg: TriageConfig, claims: Claim[], context: string, emit: (c: Claim) => void) {
-  if (!cfg.model || !cfg.openrouterKey || !claims.length) return claims;
-  const key = cfg.openrouterKey;
+async function triage(
+  cfg: TriageConfig,
+  claims: Claim[],
+  context: string,
+  emit: (c: Claim) => void,
+  llm: Llm,
+  onError?: (message: string) => void,
+) {
+  if (!cfg.model || !cfg.key || !claims.length) return claims;
+  const key = cfg.key;
+  const provider = triageProvider(cfg.model);
   const results = await Promise.all(
     claims.map(async (c): Promise<Claim> => {
       let score;
       try {
-        score = await triageClaim({ model: cfg.model, claim: c.claim, context, key });
+        score = await llm.track(provider, () => triageClaim({ model: cfg.model, claim: c.claim, context, key }));
       } catch (err) {
         console.error("triage failed, checking instead:", describeError(err));
+        onError?.(`Triage didn't work, so every claim gets the full check. ${describeError(err)}`);
         return c;
       }
       db.addClaimUsage(c.id, 0, 0, score.costUsd);
@@ -491,6 +498,10 @@ export function createPipeline(opts: {
   emit: (claim: Claim) => void;
   /** Called with the number of passages currently being scanned for claims. */
   onExtracting?: (active: number) => void;
+  /** A step failed in a way the user should hear about (e.g. the checker's key was rejected). */
+  onError?: (message: string) => void;
+  /** Quotes already extracted from this message, when re-checking it. */
+  skipQuotes?: Set<string>;
 }) {
   const limit = semaphore(4);
   const tasks: Promise<unknown>[] = [];
@@ -507,6 +518,7 @@ export function createPipeline(opts: {
           claims = await extractClaims({ ...opts, passage, passageOffset, replySoFar });
         } catch (err) {
           console.error("extraction failed:", describeError(err));
+          opts.onError?.(`Couldn't pull claims out of this answer. ${describeError(err)}`);
           return;
         } finally {
           setExtracting(-1);
@@ -520,14 +532,17 @@ export function createPipeline(opts: {
           if (prior) opts.emit(copyVerdict(c, prior));
           else fresh.push(c);
         }
-        const toCheck = await triage(opts.triage, fresh, opts.userQuestion, opts.emit);
+        const toCheck = await triage(opts.triage, fresh, opts.userQuestion, opts.emit, opts.llm, opts.onError);
 
         const context = `User asked: ${opts.userQuestion}\n\nAssistant replied (excerpt): ${passage}`;
         await Promise.all(
           toCheck.map((c) =>
             limit(() => {
               opts.emit({ ...c, status: "verifying" });
-              return verifyClaim({ ...opts, claim: c, context, force: true }).then(opts.emit);
+              return verifyClaim({ ...opts, claim: c, context, force: true }).then((done) => {
+                opts.emit(done);
+                if (done.status === "error" && done.error) opts.onError?.(`Couldn't check a claim. ${done.error}`);
+              });
             }),
           ),
         );
@@ -573,4 +588,24 @@ export function createChunker(minChars = 600) {
       return range;
     },
   };
+}
+
+// ---------- chat title ----------
+
+/** A few-word title for a chat, from its first question and answer, like a sidebar entry. */
+export async function titleChat(opts: WithLlm & { model: string; messageId: string; question: string; answer: string }) {
+  try {
+    const res = await generateText(llmOf(opts), {
+      model: opts.model,
+      system: TITLE_SYSTEM,
+      user: `<question>\n${opts.question.slice(0, 2000)}\n</question>\n\n<answer>\n${opts.answer.slice(0, 2000)}\n</answer>`,
+      maxTokens: 200,
+    });
+    db.addCheckUsage(opts.messageId, res.usage.inputTokens + res.usage.outputTokens, res.usage.costUsd);
+    const title = res.text.replace(/\s+/g, " ").replace(/^["'\s]+|["'.\s]+$/g, "").trim();
+    return res.refused || !title ? null : title.slice(0, 80);
+  } catch (err) {
+    console.error("title failed:", describeError(err));
+    return null;
+  }
 }

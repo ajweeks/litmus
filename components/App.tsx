@@ -3,29 +3,71 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import * as store from "@/lib/chatStore";
-import { authHeaders, chatPayload, loadKeys, loadSettings, saveKeys, saveSettings, streamChat } from "@/lib/client";
-import type { ApiKeys } from "@/lib/providers";
-import { PROVIDERS } from "@/lib/providers";
+import {
+  authHeaders,
+  chatPayload,
+  loadKeys,
+  loadSettings,
+  loadSidebar,
+  saveKeys,
+  saveSettings,
+  saveSidebar,
+  loadKeyFailures,
+  saveKeyFailures,
+  streamChat,
+  streamCheck,
+  withKeyStatus,
+  type KeyFailures,
+} from "@/lib/client";
+import type { KeyStatus } from "@/lib/llm/types";
+import type { ApiKeys, Provider } from "@/lib/providers";
+import { PROVIDER_IDS, PROVIDERS, enabledKeys } from "@/lib/providers";
 import type { ChatDetail, ChatMessage, Claim, Settings, StreamEvent } from "@/lib/types";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import { MessageView } from "./MessageView";
 import { TurnRail } from "./TurnRail";
 import { UsageMeter, modelLabel } from "./UsageMeter";
 import { AboutDialog } from "./AboutDialog";
-import { providerOf } from "@/lib/models";
+import { BugReportDialog } from "./BugReportDialog";
+import { MODELS, OPENROUTER_PREFIX, openRouterSlug, providerOf } from "@/lib/models";
 import { SettingsDialog } from "./SettingsDialog";
 import { isPending } from "./status";
 
 const NO_MESSAGES: ChatMessage[] = [];
+const SIDEBAR_DEFAULT = 236;
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 420;
+/** Dragging the edge closer than this to the left of the window hides the sidebar. */
+const SIDEBAR_HIDE_AT = 110;
 
 export function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [keys, setKeys] = useState<ApiKeys>({});
   /** Keys are read from localStorage after mount; don't nag about missing ones before that. */
   const [keysLoaded, setKeysLoaded] = useState(false);
+  /** Keys a provider rejected, shown in red in Settings until they next work. */
+  const [keyFailures, setKeyFailures] = useState<KeyFailures>({});
+  const noteKey = (s: { provider: Provider; ok: boolean; message?: string }) =>
+    setKeyFailures((prev) => {
+      const next = withKeyStatus(prev, s);
+      saveKeyFailures(next);
+      return next;
+    });
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showBugReport, setShowBugReport] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /** Desktop sidebar width and whether it's hidden; remembered in this browser. */
+  const [side, setSide] = useState({ width: SIDEBAR_DEFAULT, collapsed: false });
+  const sideLoaded = useRef(false);
+  useEffect(() => {
+    if (!sideLoaded.current) {
+      sideLoaded.current = true;
+      setSide(loadSidebar());
+      return;
+    }
+    saveSidebar(side);
+  }, [side]);
 
   // Chats live in this browser (lib/chatStore.ts); re-render whenever the store changes.
   const storeVersion = useSyncExternalStore(store.subscribe, store.getVersion, () => 0);
@@ -55,6 +97,7 @@ export function App() {
   useEffect(() => {
     setSettings(loadSettings());
     setKeys(loadKeys());
+    setKeyFailures(loadKeyFailures());
     setKeysLoaded(true);
     const id = new URLSearchParams(location.search).get("c");
     store.load().then(() => {
@@ -198,8 +241,15 @@ export function App() {
         case "summary":
           patchMessage(e.message.id, (m) => ({ ...m, checkSummary: e.message.checkSummary, usage: e.message.usage }));
           break;
+        case "title":
+          update((d) => ({ ...d, chat: { ...d.chat, title: e.title } }));
+          break;
+        case "key_status":
+          noteKey(e);
+          break;
         case "error":
           setError(e.message);
+          if (e.messageId) patchMessage(e.messageId, (m) => ({ ...m, checkFailed: true }));
           break;
       }
     };
@@ -219,6 +269,8 @@ export function App() {
       openStreams.current--;
       if (assistantId) {
         const done = assistantId;
+        // A reply that failed before writing anything leaves no empty answer behind.
+        update((d) => ({ ...d, messages: d.messages.filter((m) => m.id !== done || m.content) }));
         const drop = (prev: Set<string>) => {
           const next = new Set(prev);
           next.delete(done);
@@ -236,7 +288,8 @@ export function App() {
   };
 
   /** Both the chat model's and the checker's providers need a key before anything can be sent. */
-  const missingModel = [settings.mainModel, settings.checkerModel].find((m) => !keys[providerOf(m)]) ?? "";
+  const usableKeys = enabledKeys(keys, settings.disabledKeys);
+  const missingModel = [settings.mainModel, settings.checkerModel].find((m) => !usableKeys[providerOf(m)]) ?? "";
   const missing = providerOf(missingModel);
   const hasKeys = !missingModel;
 
@@ -262,7 +315,12 @@ export function App() {
       }),
     });
     if (res.ok) {
-      const { claim, message } = (await res.json()) as { claim: Claim; message: ChatMessage | null };
+      const { claim, message, keyStatus } = (await res.json()) as {
+        claim: Claim;
+        message: ChatMessage | null;
+        keyStatus: KeyStatus[];
+      };
+      keyStatus.forEach(noteKey);
       store.updateChat(id, (d) => ({
         ...store.upsertClaim(d, claim),
         messages: d.messages.map((x) =>
@@ -283,6 +341,84 @@ export function App() {
     } else {
       store.updateChat(id, (d) => store.upsertClaim(d, c));
       setError((await res.json().catch(() => ({}))).error ?? "Re-check failed.");
+    }
+  };
+
+  /** Retry fact-checking an answer whose check failed: failed claims, and extraction if that failed. */
+  const retryCheck = async (messageId: string) => {
+    if (!chatId) return;
+    const id = chatId;
+    const d = store.getChat(id);
+    const target = d?.messages.find((m) => m.id === messageId);
+    if (!d || !target) return;
+    const reextract = !!target.checkFailed || !d.claims.some((c) => c.messageId === messageId);
+    store.updateChat(id, (d) => ({
+      ...d,
+      messages: d.messages.map((m) => (m.id === messageId ? { ...m, checkFailed: false } : m)),
+    }));
+    setError(null);
+    setAnalysingIds((prev) => new Set(prev).add(messageId));
+    openStreams.current++;
+    try {
+      await streamCheck({ ...chatPayload(d), messageId, reextract, settings }, (e) => {
+        switch (e.type) {
+          case "claim":
+            store.updateChat(id, (d) => store.upsertClaim(d, e.claim));
+            break;
+          case "extracting":
+            setExtractingIds((prev) => {
+              const next = new Set(prev);
+              if (e.active > 0) next.add(messageId);
+              else next.delete(messageId);
+              return next;
+            });
+            break;
+          case "summary":
+            // The server only saw this retry, so its check usage is what the retry cost.
+            store.updateChat(id, (d) => ({
+              ...d,
+              messages: d.messages.map((m) =>
+                m.id === messageId
+                  ? {
+                      ...m,
+                      checkSummary: e.message.checkSummary,
+                      usage: m.usage && {
+                        ...m.usage,
+                        checkTokens: m.usage.checkTokens + (e.message.usage?.checkTokens ?? 0),
+                        checkCostUsd: m.usage.checkCostUsd + (e.message.usage?.checkCostUsd ?? 0),
+                      },
+                    }
+                  : m,
+              ),
+            }));
+            break;
+          case "key_status":
+            noteKey(e);
+            break;
+          case "error":
+            setError(e.message);
+            store.updateChat(id, (d) => ({
+              ...d,
+              messages: d.messages.map((m) => (m.id === messageId ? { ...m, checkFailed: true } : m)),
+            }));
+            break;
+        }
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      store.updateChat(id, (d) => ({
+        ...d,
+        messages: d.messages.map((m) => (m.id === messageId ? { ...m, checkFailed: true } : m)),
+      }));
+    } finally {
+      openStreams.current--;
+      const drop = (prev: Set<string>) => {
+        const next = new Set(prev);
+        next.delete(messageId);
+        return next;
+      };
+      setAnalysingIds(drop);
+      setExtractingIds(drop);
     }
   };
 
@@ -346,16 +482,43 @@ export function App() {
 
   const empty = messages.length === 0;
 
+  // ---------- sidebar: drag its edge to resize, or past the left edge (or the arrow) to hide ----------
+
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+    const move = (ev: PointerEvent) => {
+      if (ev.clientX < SIDEBAR_HIDE_AT) setSide((p) => ({ ...p, collapsed: true }));
+      else setSide({ collapsed: false, width: Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, ev.clientX)) });
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      document.body.classList.remove("resizing");
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+  };
+  /** On phones the sidebar is an overlay, so "hide" just closes it. */
+  const hideSidebar = () =>
+    matchMedia("(max-width: 760px)").matches ? setSidebarOpen(false) : setSide((p) => ({ ...p, collapsed: true }));
+
   return (
-    <div className={`app${sidebarOpen ? " sidebar-open" : ""}`}>
+    <div
+      className={`app${sidebarOpen ? " sidebar-open" : ""}${side.collapsed ? " sidebar-collapsed" : ""}`}
+      style={{ "--side-w": `${side.width}px` } as React.CSSProperties}
+    >
       <aside className="sidebar">
         <div className="brand">
           <span className="brand__mark" aria-hidden>
             ✓
           </span>
-          <span className="brand__name">
-            fact<b>/</b>check
-          </span>
+          <span className="brand__name">litmus</span>
+          <button className="sidebar__toggle" onClick={hideSidebar} aria-label="Hide sidebar" title="Hide sidebar">
+            ‹
+          </button>
         </div>
         <button className="btn btn--new" onClick={() => selectChat(null)}>
           New chat <kbd>+</kbd>
@@ -374,14 +537,26 @@ export function App() {
           ))}
         </nav>
         <div className="sidebar__foot">
-          <Link href="/claims">Claims database</Link>
+          <Link href={chatId ? `/claims?from=${encodeURIComponent(`/?c=${chatId}`)}` : "/claims"}>Claims database</Link>
           <button className="link" onClick={() => setShowSettings(true)}>
             Settings
           </button>
           <button className="link" onClick={() => setShowAbout(true)}>
             About
           </button>
+          <button className="link" onClick={() => setShowBugReport(true)}>
+            Report a bug
+          </button>
         </div>
+        <div
+          className="sidebar__resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar (drag to the left edge to hide it)"
+          title="Drag to resize · double-click to hide"
+          onPointerDown={startResize}
+          onDoubleClick={hideSidebar}
+        />
       </aside>
       <div className="scrim" onClick={() => setSidebarOpen(false)} />
 
@@ -390,14 +565,19 @@ export function App() {
           <button className="link menu" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar">
             ☰
           </button>
-          <button className="topbar__mode" onClick={() => setShowSettings(true)}>
-            <span>{modelLabel(settings.mainModel)}</span>
-            <span className="sep">→</span>
-            <span>checked by {modelLabel(settings.checkerModel)}</span>
-            <span className="pill pill--mode">
-              {{ facts: "facts", judgments: "facts + judgments", critique: "full critique" }[settings.strictness]}
-            </span>
-          </button>
+          {side.collapsed && (
+            <button
+              className="sidebar__toggle sidebar__toggle--open"
+              onClick={() => setSide((p) => ({ ...p, collapsed: false }))}
+              aria-label="Show sidebar"
+              title="Show sidebar"
+            >
+              ›
+            </button>
+          )}
+          <h1 className="topbar__title" title={detail?.chat.title}>
+            {detail?.chat.title ?? "New chat"}
+          </h1>
         </header>
 
         {empty ? (
@@ -409,6 +589,9 @@ export function App() {
               A second model pulls the claims out of every reply, checks them against web sources, and marks what it
               finds in the margin.
             </p>
+            <button className="hero__models" onClick={() => setShowSettings(true)} title="Change models">
+              {modelLabel(settings.mainModel)} <span className="sep">→</span> checked by {modelLabel(settings.checkerModel)}
+            </button>
           </div>
         ) : (
           <div className="thread">
@@ -432,6 +615,7 @@ export function App() {
                 activeClaimId={activeClaimId}
                 onSelect={setActiveClaimId}
                 onRecheck={recheck}
+                onRetryCheck={() => retryCheck(m.id)}
                 onSendCorrections={() => send("", true)}
               />
             ))}
@@ -447,7 +631,7 @@ export function App() {
           {keysLoaded && !hasKeys && (
             <div className="notice">
               <button className="link" onClick={() => setShowSettings(true)}>
-                {Object.keys(keys).length ? `Add a ${PROVIDERS[missing].label} key` : "Add an API key"}
+                {Object.keys(keys).length ? `Add or switch on a ${PROVIDERS[missing].label} key` : "Add an API key"}
               </button>{" "}
               {Object.keys(keys).length ? `for ${modelLabel(missingModel)}, or pick another model.` : "to start."}
             </div>
@@ -472,6 +656,36 @@ export function App() {
               rows={1}
               autoFocus
             />
+            <select
+              className="composer__model"
+              value={settings.mainModel}
+              onChange={(e) => {
+                const s = { ...settings, mainModel: e.target.value };
+                setSettings(s);
+                saveSettings(s);
+              }}
+              aria-label="Chat model"
+              title="Model for the next answer (switch any time; earlier answers keep theirs)"
+            >
+              {PROVIDER_IDS.map((p) => {
+                const ids = [
+                  ...MODELS.filter((m) => m.provider === p && m.main).map((m) => m.id),
+                  ...(p === "openrouter" ? settings.openrouterModels.map((slug) => `${OPENROUTER_PREFIX}${slug}`) : []),
+                ];
+                // Only models with a key in use, plus the current one so the menu never goes blank.
+                const shown = ids.filter((id) => usableKeys[p] || id === settings.mainModel);
+                if (!shown.length) return null;
+                return (
+                  <optgroup key={p} label={PROVIDERS[p].label}>
+                    {shown.map((id) => (
+                      <option key={id} value={id}>
+                        {p === "openrouter" ? openRouterSlug(id) : modelLabel(id)}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
             <button
               className="send"
               type="submit"
@@ -482,17 +696,23 @@ export function App() {
               ↑
             </button>
           </form>
-          {!empty && <UsageMeter messages={messages} claims={[...claims.values()]} />}
+          {!empty && (
+            <UsageMeter messages={messages} claims={[...claims.values()]} onClick={() => setShowSettings(true)} />
+          )}
         </div>
       </main>
 
       {showAbout && <AboutDialog onClose={() => setShowAbout(false)} />}
+      {showBugReport && <BugReportDialog onClose={() => setShowBugReport(false)} />}
       {showSettings && (
         <SettingsDialog
           settings={settings}
           keys={keys}
+          keyFailures={keyFailures}
           onClose={() => setShowSettings(false)}
           onSave={(s, k) => {
+            // A replaced key hasn't been tried yet, so it's no longer marked as failed.
+            for (const p of Object.keys(keyFailures) as Provider[]) if (k[p] !== keys[p]) noteKey({ provider: p, ok: true });
             setSettings(s);
             saveSettings(s);
             setKeys(k);

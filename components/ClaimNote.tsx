@@ -80,7 +80,7 @@ export function ClaimNote({ claim, minor, active, showSources, onSelect, onReche
             <button className="link" disabled={pending} onClick={() => onRecheck(claim.id)}>
               Re-check
             </button>
-            <Link className="link" href={`/claims?id=${claim.id}`}>
+            <Link className="link" href={`/claims?id=${claim.id}&from=${encodeURIComponent(`/?c=${claim.chatId}`)}`}>
               Details
             </Link>
           </div>

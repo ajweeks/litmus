@@ -8,6 +8,7 @@
 
 import type { ChatDetail, ChatSummary, Claim } from "./types";
 
+// Storage names keep the project's old name so existing chats, keys and settings carry over.
 const DB_NAME = "factcheck";
 const STORE = "chats";
 const WRITE_DELAY_MS = 400;
@@ -110,6 +111,25 @@ export function updateChat(id: string, fn: (d: ChatDetail) => ChatDetail, create
   if (!current) return;
   cache.set(id, fn(current));
   schedule(id);
+  notify();
+}
+
+/** Delete every chat in this browser. */
+export async function clearAll() {
+  cache.clear();
+  dirty.clear();
+  if (flushTimer) clearTimeout(flushTimer);
+  flushTimer = null;
+  const d = await db();
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = d!.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).clear();
+      tx.oncomplete = tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
   notify();
 }
 

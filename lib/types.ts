@@ -1,5 +1,7 @@
 // Types shared by the server pipeline and the browser UI.
 
+import type { Provider } from "./providers";
+
 export type Strictness = "facts" | "judgments" | "critique";
 
 export type ClaimStatus =
@@ -125,6 +127,8 @@ export interface ChatMessage {
   thinkingMs?: number | null;
   /** Tool calls the model made while answering (searches, page fetches, code). */
   activity?: ToolActivity[];
+  /** Fact-checking this answer failed somewhere (browser-only; cleared when it's retried). */
+  checkFailed?: boolean;
 }
 
 export interface ToolActivity {
@@ -180,6 +184,10 @@ export interface Settings {
   mainTools: boolean;
   /** Also show supported claims in the margin, not only problems. */
   showSupported: boolean;
+  /** Keys kept but switched off: not sent, and their models can't be picked. */
+  disabledKeys: Provider[];
+  /** OpenRouter models ("vendor/model") to list in the model menus. */
+  openrouterModels: string[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -193,6 +201,8 @@ export const DEFAULT_SETTINGS: Settings = {
   queueCorrections: true,
   mainTools: true,
   showSupported: false,
+  disabledKeys: [],
+  openrouterModels: [],
 };
 
 
@@ -214,7 +224,12 @@ export type StreamEvent =
   /** How many passages of a reply are being scanned for claims right now. */
   | { type: "extracting"; messageId: string; active: number }
   | { type: "summary"; message: ChatMessage }
-  | { type: "error"; message: string }
+  /** A short name for the chat, written after its first answer. */
+  | { type: "title"; title: string }
+  /** `messageId` is set when checking that answer failed (so it can offer a retry). */
+  | { type: "error"; message: string; messageId?: string }
+  /** Whether a key worked; a rejected key is shown in red in Settings until it works again. */
+  | { type: "key_status"; provider: Provider; ok: boolean; message?: string }
   | { type: "end" };
 
 /** A problem verdict that's important enough to show, summarise and feed back. */

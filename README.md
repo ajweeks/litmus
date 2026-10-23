@@ -1,6 +1,6 @@
-# fact/check
+# litmus
 
-A chat UI for Claude that fact-checks the model's replies as they stream. A cheaper model picks out the claims in each reply, checks them against web sources, and marks them in the margin. Corrections can go back to the main model, either automatically on your next turn or with a button.
+A chat UI that fact-checks the model's replies as they stream. A cheaper model picks out the claims in each reply, checks them against web sources, and marks them in the margin. Corrections can go back to the main model, either automatically on your next turn or with a button.
 
 Every claim is saved to a database with its verdict, sources, confidence, token cost and links to related claims. The database is shared across chats, so a claim that has already been checked is reused rather than searched again.
 
@@ -12,7 +12,7 @@ cp .env.example .env.local   # optional: choose where the database lives
 npm run dev                  # http://localhost:3000
 ```
 
-Open **Settings** and paste your own API keys: Anthropic, OpenAI, Google Gemini, Mistral, DeepSeek, Z.ai (GLM) or OpenRouter (for triage). The provider is recognised from the key's shape, and either model can come from any provider you have a key for. Keys stay in the browser's localStorage, are sent with each request in `x-key-<provider>` headers, and are never stored on the server. The server has no keys of its own and ignores provider environment variables.
+Open **Settings** and paste your own API keys: Anthropic, OpenAI, Google Gemini, xAI (Grok), Mistral, DeepSeek, Alibaba Cloud (Qwen), Z.ai (GLM), NVIDIA NIM, OpenRouter or TypeSafe (Jev, for triage). The provider is recognised from the key's shape where it can be (DeepSeek and Alibaba keys look identical, so you pick), and each key can be switched off without deleting it. Either model can come from any provider you have a key for; with an OpenRouter key you choose which of its models to list. NVIDIA's API has no web search, so its models can answer but not check. Keys stay in the browser's localStorage, are sent with each request in `x-key-<provider>` headers, and are never stored on the server. The server has no keys of its own and ignores provider environment variables.
 
 ## How it works
 
@@ -99,6 +99,8 @@ Each claim records:
 | | |
 |---|---|
 | `POST /api/chat` | `{ chat, messages, content, settings, correctionRequest? }` → NDJSON stream of `meta`, `thinking`, `activity`, `text`, `message_done`, `claim`, `extracting`, `summary`, `error`, `end` |
+| `POST /api/check` | `{ chat, messages, messageId, reextract, settings }` → retry fact-checking one answer (re-verifies failed claims; re-extracts if `reextract`), same events as `/api/chat` |
+| `POST /api/report` | `{ message, email? }` → emails a bug report (needs `REPORT_TO` and `SMTP_URL`) |
 | `GET /api/claims?ids=a,b` | current state of these claims (for checks that finished after the browser disconnected). There's no listing: the cache holds every user's claims |
 | `GET /api/claims/:id`, `POST /api/claims/:id` | read a claim; re-verify it (`{ model, minImportance, chat, messages }`) |
 
@@ -122,6 +124,7 @@ components/ClaimNote.tsx    margin note and its detail view
 - **Long requests.** The chat stream stays open until every claim in the reply is verified, which can take 20–60 s. Serverless hosts with short limits will cut it off. Results still go into the claims cache as they finish, and the browser asks for its pending claims until they're done. A long-running Node host (Fly, Railway, a VM) is simplest. On Vercel, `maxDuration` is set to 300.
 - **Bring-your-own-key.** Keys pass through the server for each request, so users have to trust the host. The server never reads keys from its environment, so it never pays for anyone's usage.
 - **Shared cloud database.** `lib/db.ts` is synchronous SQLite. For a hosted, multi-user database, port it to Postgres (for example Neon or Supabase). The rest of the app only calls its exported functions.
+- **Bug reports.** The "Report a bug" form emails the maintainer through SMTP. Set `REPORT_TO` (the address) and `SMTP_URL` (and optionally `REPORT_FROM`) to turn it on. Without them, the form says reports aren't set up. It allows one report per minute per sender and 30 an hour in total.
 
 ## Ideas for the next iteration
 

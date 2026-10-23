@@ -2,7 +2,7 @@
 // research go through it; structured completions use chat completions with a JSON schema.
 
 import { priceOf } from "../models";
-import { ensureOk, readSse } from "../sse";
+import { providerFetch, readSse } from "../sse";
 import type { ToolActivity } from "../types";
 import type { CompleteArgs, CompleteResult, ReplyArgs, ReplyResult, ResearchArgs, ResearchResult, Usage } from "./types";
 
@@ -38,11 +38,11 @@ function toUsage(model: string, u: MistralUsage | undefined): Usage {
 }
 
 const post = (key: string, path: string, body: object) =>
-  fetch(`${API}${path}`, {
+  providerFetch("Mistral", `${API}${path}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  }).then((res) => ensureOk(res, "Mistral"));
+  });
 
 /** Content arrives as a plain string, one chunk, or a list of chunks. */
 const chunksOf = (c: ContentChunk | ContentChunk[] | null | undefined): ContentChunk[] =>
@@ -84,7 +84,7 @@ export async function streamMistralReply(a: ReplyArgs): Promise<ReplyResult> {
     usage?: MistralUsage;
     message?: string;
   };
-  for await (const e of readSse<Event>(res)) {
+  for await (const e of readSse<Event>(res, "Mistral")) {
     if (e.type === "tool.execution.started" || e.type === "tool.execution.delta") {
       const line = describeCall(e.name ?? "", e.arguments ?? "", thinkingLength);
       const known = e.id ? byCall.get(e.id) : undefined;

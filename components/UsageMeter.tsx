@@ -1,31 +1,21 @@
 import type { ChatMessage, Claim } from "@/lib/types";
+import { modelLabel } from "@/lib/models";
 import { formatCost } from "./status";
 
-const BRANDS: Record<string, string> = { gpt: "GPT", glm: "GLM", deepseek: "DeepSeek" };
-
-/** "claude-opus-5-5" → "Opus 5.5", "~typesafe/jev-latest" → "Jev", "openai/gpt-6-luna" → "GPT-6 Luna". */
-export function modelLabel(id: string): string {
-  const parts = id
-    .split("/")
-    .pop()!
-    .replace(/^~/, "")
-    .replace(/^(claude|pplx)-/, "")
-    .replace(/-latest$/, "")
-    .split("-");
-  const out: string[] = [];
-  for (const p of parts) {
-    const prev = out[out.length - 1];
-    if (/^\d+$/.test(p) && prev && /\d$/.test(prev)) out[out.length - 1] = `${prev}.${p}`;
-    else if (/^\d/.test(p) && prev === "GPT") out[out.length - 1] = `GPT-${p}`;
-    else out.push(BRANDS[p] ?? (/^v\d/.test(p) ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1)));
-  }
-  return out.join(" ");
-}
+export { modelLabel };
 
 const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`);
 
-/** This chat's spend, split between the model answering and the models checking it. */
-export function UsageMeter({ messages, claims }: { messages: ChatMessage[]; claims: Claim[] }) {
+/** This chat's spend, split between the model answering and the models checking it. Opens settings on click. */
+export function UsageMeter({
+  messages,
+  claims,
+  onClick,
+}: {
+  messages: ChatMessage[];
+  claims: Claim[];
+  onClick: () => void;
+}) {
   const replies = messages.filter((m) => m.role === "assistant");
   const main = {
     models: new Set(replies.flatMap((m) => (m.model ? [m.model] : []))),
@@ -51,9 +41,13 @@ export function UsageMeter({ messages, claims }: { messages: ChatMessage[]; clai
     </div>
   );
   return (
-    <div className="usage" title="This chat's usage. Costs are estimates from list prices.">
+    <button
+      className="usage"
+      onClick={onClick}
+      title="This chat's usage (costs are estimates from list prices). Click to change models."
+    >
       {row("Answer", main)}
       {row("Check", check)}
-    </div>
+    </button>
   );
 }

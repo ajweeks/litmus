@@ -28,6 +28,8 @@ interface Props {
   activeClaimId: string | null;
   onSelect: (id: string | null) => void;
   onRecheck: (id: string) => void;
+  /** Retry fact-checking this answer after a failure. */
+  onRetryCheck: () => void;
   onSendCorrections: () => void;
 }
 
@@ -164,11 +166,13 @@ export function MessageView(p: Props) {
     <div className="turn turn--assistant">
       <div className="turn__label">{p.streaming ? <span className="live" /> : "Answer"}</div>
       <div className="turn__main" ref={mainRef}>
-        {(!!p.message.thinking || !!p.message.activity?.length) && (
+        {/* Reasoning and tool use, if any, and which model answered (useful after switching models). */}
+        {(!!p.message.thinking || !!p.message.activity?.length || (!p.streaming && !!p.message.content)) && (
           <Thinking
             text={p.message.thinking ?? ""}
             activity={p.message.activity ?? []}
             active={p.streaming && !p.message.content}
+            model={p.message.model}
           />
         )}
         <div className="prose" ref={bodyRef} onClick={onBodyClick}>
@@ -198,7 +202,7 @@ export function MessageView(p: Props) {
                 <span className="spinner" /> finding claims
               </span>
             ) : (
-              p.claims.length === 0 && !p.streaming && <span>No checkable claims</span>
+              p.claims.length === 0 && !p.streaming && !p.message.checkFailed && <span>No checkable claims</span>
             )}
             {counts.map(([key, n]) => (
               <button
@@ -210,6 +214,18 @@ export function MessageView(p: Props) {
                 <i /> {n} {key === "minor" ? "minor" : STATUS[key as Claim["status"]].label.toLowerCase()}
               </button>
             ))}
+            {/* Something in this answer's check failed and nothing is running: offer a retry. */}
+            {!p.analysing &&
+              !p.extracting &&
+              checking === 0 &&
+              (p.message.checkFailed || p.claims.some((c) => c.status === "error")) && (
+                <span className="tally tally--error">
+                  Fact-check failed
+                  <button className="link" onClick={p.onRetryCheck}>
+                    Retry
+                  </button>
+                </span>
+              )}
             {checking > 0 && (
               <span className="tally">
                 <span className="spinner" /> checking {checking}

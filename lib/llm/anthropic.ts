@@ -20,6 +20,7 @@ export async function streamAnthropicReply(client: Anthropic, a: Omit<ReplyArgs,
   let usage = NO_USAGE;
   let thinkingLength = 0;
   let wroteText = false;
+  let answeredBy: string | undefined;
   const activity: ToolActivity[] = [];
 
   // Server tools run on Anthropic's side; a long tool turn can pause, so resume it a few times.
@@ -84,12 +85,13 @@ export async function streamAnthropicReply(client: Anthropic, a: Omit<ReplyArgs,
       }
     }
     const final = await reply.finalMessage();
+    answeredBy = final.model;
     usage = addUsage(usage, anthropicUsage(a.model, final.usage));
     a.onUsage?.(usage);
-    if (final.stop_reason === "refusal") return { usage, refused: !wroteText };
+    if (final.stop_reason === "refusal") return { usage, refused: !wroteText, model: answeredBy };
     if (final.stop_reason !== "pause_turn") break;
     container = final.container?.id ?? container;
     messages = [...messages, { role: "assistant", content: final.content as Anthropic.Beta.BetaContentBlockParam[] }];
   }
-  return { usage, refused: false };
+  return { usage, refused: false, model: answeredBy };
 }

@@ -233,6 +233,10 @@ export function updateMessageContent(id: string, content: string) {
   getDb().prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, id);
 }
 
+export function setMessageModel(id: string, model: string) {
+  getDb().prepare("UPDATE messages SET model = ? WHERE id = ?").run(model, id);
+}
+
 export function setThinking(id: string, thinking: string, ms: number | null) {
   getDb().prepare("UPDATE messages SET thinking = ?, thinking_ms = ? WHERE id = ?").run(thinking, ms, id);
 }

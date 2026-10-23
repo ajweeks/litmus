@@ -196,3 +196,5 @@ export const TRIAGE_CRITERIA = {
   inaccurate: "The claim is wrong or misleading in a way that matters.",
   unsure: "It can't be judged with confidence without looking it up.",
 };
+
+export const TITLE_SYSTEM = `You name chats for a sidebar. Given the first question and answer, reply with a title of 2 to 6 words that says what the chat is about, like "Tofu protein content" or "Artemis II crew". Use sentence case, no quotes, no final full stop, nothing else.`;

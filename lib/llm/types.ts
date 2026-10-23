@@ -1,6 +1,7 @@
 // The provider-neutral surface the chat route and the fact-checker call. Each provider module
 // implements the parts its API supports.
 
+import type { Provider } from "../providers";
 import type { ToolActivity } from "../types";
 
 export interface Turn {
@@ -43,6 +44,8 @@ export interface ReplyArgs {
 export interface ReplyResult {
   usage: Usage;
   refused: boolean;
+  /** The model that actually answered, if the provider says and it differs (e.g. a fallback). */
+  model?: string;
 }
 
 export interface CompleteArgs {
@@ -77,4 +80,11 @@ export interface ResearchResult {
   /** Verbatim page text the provider attached to citations, by URL, where it gives any. */
   citedText: Map<string, string[]>;
   usage: Usage;
+}
+
+/** Whether a provider's key worked on its latest call, and why not if it didn't. */
+export interface KeyStatus {
+  provider: Provider;
+  ok: boolean;
+  message?: string;
 }
