@@ -8,11 +8,11 @@ Every claim is saved to a database with its verdict, sources, confidence, token 
 
 ```bash
 npm install
-cp .env.example .env.local   # optional: set ANTHROPIC_API_KEY for local use
+cp .env.example .env.local   # optional: choose where the database lives
 npm run dev                  # http://localhost:3000
 ```
 
-Without a server key, open **Settings** and paste your own Anthropic API key. It stays in the browser's localStorage, is sent with each request in an `x-anthropic-key` header, and is never stored on the server.
+Open **Settings** and paste your own API keys: Anthropic, OpenAI, Google Gemini, Mistral, DeepSeek, Z.ai (GLM) or OpenRouter (for triage). The provider is recognised from the key's shape, and either model can come from any provider you have a key for. Keys stay in the browser's localStorage, are sent with each request in `x-key-<provider>` headers, and are never stored on the server. The server has no keys of its own and ignores provider environment variables.
 
 ## How it works
 
@@ -77,7 +77,9 @@ Set in Settings. Each level is a block of prompt text in `lib/prompts.ts`, which
 
 ## Data
 
-SQLite at `data/factcheck.db` (override with `FACTCHECK_DB_PATH`). Tables: `chats`, `messages`, `claims`, `sources`, `claim_links`.
+**Chat history is stored only in the browser** (IndexedDB, `lib/chatStore.ts`): chats, messages and each chat's claims. The browser sends the chat with every request. The server loads it into SQLite for the length of the request and deletes it afterwards (`lib/session.ts`), so it keeps no prompts or replies. Clearing site data deletes the history.
+
+The server keeps one thing: a **shared cache of checked claims** in SQLite at `data/factcheck.db` (override with `FACTCHECK_DB_PATH`), in the tables `claims`, `sources` and `claim_links`. Verdicts in it are reused across chats and users. The `chats` and `messages` tables only hold chats that have a request in progress.
 
 Each claim records:
 
@@ -96,12 +98,11 @@ Each claim records:
 
 | | |
 |---|---|
-| `POST /api/chat` | `{ chatId?, content, settings, correctionRequest? }` → NDJSON stream of `meta`, `text`, `message_done`, `claim`, `error`, `end` |
-| `GET /api/chats`, `GET/DELETE /api/chats/:id` | chat list; a chat with its messages and claims |
-| `GET /api/claims?status=&category=&model=&q=&chatId=&format=json\|jsonl&limit=` | export the claims database |
-| `GET /api/claims/:id`, `POST /api/claims/:id` | read a claim; re-verify it (`{ model }`) |
+| `POST /api/chat` | `{ chat, messages, content, settings, correctionRequest? }` → NDJSON stream of `meta`, `thinking`, `activity`, `text`, `message_done`, `claim`, `extracting`, `summary`, `error`, `end` |
+| `GET /api/claims?ids=a,b` | current state of these claims (for checks that finished after the browser disconnected). There's no listing: the cache holds every user's claims |
+| `GET /api/claims/:id`, `POST /api/claims/:id` | read a claim; re-verify it (`{ model, minImportance, chat, messages }`) |
 
-The **Claims database** page (`/claims`) lists every claim. It has a text search (claims, quotes, findings, source URLs) and filters for verdict, claim type, checker model, chat, minimum confidence and "sent to model". The export links carry the filters the API supports.
+The **Claims database** page (`/claims`) lists the claims from the chats saved in this browser. Its search is fuzzy: every word must appear somewhere, in any order, with a typo or two allowed in longer words. It also filters by verdict, claim type, checker model, chat, minimum confidence and "sent to model". Export downloads whatever is currently shown, as JSON or JSONL.
 
 ## Code map
 
@@ -118,8 +119,8 @@ components/ClaimNote.tsx    margin note and its detail view
 
 ## Deploying
 
-- **Long requests.** The chat stream stays open until every claim in the reply is verified, which can take 20–60 s. Serverless hosts with short limits will cut it off. Results are still written to the database as they finish, and the UI polls for pending claims. A long-running Node host (Fly, Railway, a VM) is simplest. On Vercel, `maxDuration` is set to 300.
-- **Bring-your-own-key.** Keys pass through the server for each request, so users have to trust the host. For a public deployment, leave `ANTHROPIC_API_KEY` unset so the server never pays for anyone else's usage.
+- **Long requests.** The chat stream stays open until every claim in the reply is verified, which can take 20–60 s. Serverless hosts with short limits will cut it off. Results still go into the claims cache as they finish, and the browser asks for its pending claims until they're done. A long-running Node host (Fly, Railway, a VM) is simplest. On Vercel, `maxDuration` is set to 300.
+- **Bring-your-own-key.** Keys pass through the server for each request, so users have to trust the host. The server never reads keys from its environment, so it never pays for anyone's usage.
 - **Shared cloud database.** `lib/db.ts` is synchronous SQLite. For a hosted, multi-user database, port it to Postgres (for example Neon or Supabase). The rest of the app only calls its exported functions.
 
 ## Ideas for the next iteration

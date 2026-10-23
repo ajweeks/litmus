@@ -1,11 +1,16 @@
 "use client";
 
-import type { Settings, StreamEvent } from "./types";
+import type { ChatDetail, Settings, StreamEvent } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+import type { ApiKeys, Provider } from "./providers";
 
 // API keys live only in this browser's localStorage and are sent with each request.
-const KEY_STORAGE = "factcheck.apiKey";
-const OPENROUTER_STORAGE = "factcheck.openrouterKey";
+const KEYS_STORAGE = "factcheck.keys";
+// Single-key storage from before multi-provider support; read once and folded into KEYS_STORAGE.
+const LEGACY_KEYS: [string, Provider][] = [
+  ["factcheck.apiKey", "anthropic"],
+  ["factcheck.openrouterKey", "openrouter"],
+];
 const SETTINGS_STORAGE = "factcheck.settings";
 
 function read(key: string): string | null {
@@ -25,32 +30,64 @@ function write(key: string, value: string | null) {
   }
 }
 
-export const loadApiKey = () => read(KEY_STORAGE) ?? "";
-export const saveApiKey = (k: string) => write(KEY_STORAGE, k.trim() || null);
-export const loadOpenRouterKey = () => read(OPENROUTER_STORAGE) ?? "";
-export const saveOpenRouterKey = (k: string) => write(OPENROUTER_STORAGE, k.trim() || null);
+export function loadKeys(): ApiKeys {
+  let keys: ApiKeys = {};
+  try {
+    keys = JSON.parse(read(KEYS_STORAGE) ?? "{}");
+  } catch {
+    // Corrupt entry: start over.
+  }
+  const legacy = LEGACY_KEYS.filter(([name]) => read(name));
+  if (legacy.length) {
+    for (const [name, provider] of legacy) keys[provider] ||= read(name)!;
+    saveKeys(keys);
+    legacy.forEach(([name]) => write(name, null));
+  }
+  return keys;
+}
+
+export function saveKeys(keys: ApiKeys) {
+  const clean = Object.fromEntries(Object.entries(keys).filter(([, v]) => v?.trim()));
+  write(KEYS_STORAGE, Object.keys(clean).length ? JSON.stringify(clean) : null);
+}
 
 export function loadSettings(): Settings {
   try {
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(read(SETTINGS_STORAGE) ?? "{}") };
+    const s: Settings = { ...DEFAULT_SETTINGS, ...JSON.parse(read(SETTINGS_STORAGE) ?? "{}") };
+    // "Only major errors" is no longer offered; fold it into the default.
+    if (s.strictness === "facts" && s.minImportance === "major") s.minImportance = "moderate";
+    return s;
   } catch {
     return DEFAULT_SETTINGS;
   }
 }
 export const saveSettings = (s: Settings) => write(SETTINGS_STORAGE, JSON.stringify(s));
 
+/** One header per stored key: x-key-anthropic, x-key-openai, ... */
 export function authHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  const key = loadApiKey();
-  if (key) headers["x-anthropic-key"] = key;
-  const orKey = loadOpenRouterKey();
-  if (orKey) headers["x-openrouter-key"] = orKey;
-  return headers;
+  return Object.fromEntries(
+    Object.entries(loadKeys())
+      .filter(([, k]) => k)
+      .map(([p, k]) => [`x-key-${p}`, k!]),
+  );
+}
+
+/**
+ * The chat as the server needs it for a request: chat history is kept only in this browser, so
+ * it's sent along each time. Only what the model and checker need, not thinking or usage.
+ */
+export function chatPayload(d: ChatDetail) {
+  return {
+    chat: d.chat,
+    messages: d.messages
+      .filter((m) => !m.id.startsWith("tmp_"))
+      .map(({ id, role, content, kind, model, createdAt }) => ({ id, role, content, kind, model, createdAt })),
+  };
 }
 
 /** POST /api/chat and call `onEvent` for each NDJSON event until the stream ends. */
 export async function streamChat(
-  body: { chatId?: string; content?: string; correctionRequest?: boolean; settings: Settings },
+  body: ReturnType<typeof chatPayload> & { content?: string; correctionRequest?: boolean; settings: Settings },
   onEvent: (e: StreamEvent) => void,
   signal?: AbortSignal,
 ) {

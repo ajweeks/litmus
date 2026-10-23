@@ -5,13 +5,31 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import * as db from "./db";
-import { estimateCost, describeError, inputTokens, webSearchTool } from "./anthropic";
-import { extractorSystem, extractorUser, SUMMARY_SYSTEM, summaryUser, verifierSystem, verifierUser } from "./prompts";
+import { estimateCost, inputTokens, webSearchTool } from "./anthropic";
+import { complete, describeError, Llm, research } from "./llm";
+import { providerOf } from "./models";
+import {
+  extractorSystem,
+  extractorUser,
+  SUMMARY_SYSTEM,
+  summaryUser,
+  VERDICT_RECORD_SYSTEM,
+  verdictRecordUser,
+  verifierSystem,
+  verifierUser,
+} from "./prompts";
 import { verbatimQuote } from "./sources";
 import { locate } from "./text";
 import { triageClaim } from "./triage";
 import type { Claim, ClaimStatus, Importance, Source, Strictness, Volatility } from "./types";
 import { isNotableProblem, isReusable, VOLATILITY_TTL_MS } from "./types";
+
+/** Calls take an Llm; the evals pass a bare Anthropic client instead. */
+type WithLlm = { llm?: Llm; client?: Anthropic };
+const llmOf = (a: WithLlm) => a.llm ?? Llm.fromClient(a.client!);
+
+/** The JSON text a model returned, without the code fence some wrap it in. */
+const parseJson = (text: string): unknown => JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
 
 // ---------- extraction ----------
 
@@ -27,8 +45,31 @@ const ExtractionSchema = z.object({
   ),
 });
 
-export interface ExtractArgs {
-  client: Anthropic;
+// ExtractionSchema as plain JSON Schema, for providers called without the SDK's zod helper.
+const EXTRACTION_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    claims: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          quote: { type: "string" },
+          claim: { type: "string" },
+          category: { type: "string", enum: ["empirical", "interpretive", "framing"] },
+          duplicate_of: { anyOf: [{ type: "string" }, { type: "null" }] },
+          related_ids: { type: "array", items: { type: "string" } },
+        },
+        required: ["quote", "claim", "category", "duplicate_of", "related_ids"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["claims"],
+  additionalProperties: false,
+};
+
+export interface ExtractArgs extends WithLlm {
   model: string;
   strictness: Strictness;
   chatId: string;
@@ -45,20 +86,33 @@ export async function extractClaims(a: ExtractArgs): Promise<Claim[]> {
   const known = dedupeById([...chatClaims, ...db.recentVerifiedClaims(40)]);
   const knownIds = new Set(known.map((k) => k.id));
 
-  const res = await a.client.messages.parse({
-    model: a.model,
-    max_tokens: 8000,
-    output_config: { effort: "low", format: zodOutputFormat(ExtractionSchema) },
-    system: extractorSystem(a.strictness),
-    messages: [
-      {
-        role: "user",
-        content: extractorUser({ userQuestion: a.userQuestion, replySoFar: a.replySoFar, passage: a.passage, known }),
-      },
-    ],
-  });
-  if (res.stop_reason === "refusal") return [];
-  const items = res.parsed_output?.claims ?? [];
+  const system = extractorSystem(a.strictness);
+  const user = extractorUser({ userQuestion: a.userQuestion, replySoFar: a.replySoFar, passage: a.passage, known });
+  let items: z.infer<typeof ExtractionSchema>["claims"];
+  let usage: { input: number; output: number; cost: number };
+  if (providerOf(a.model) === "anthropic") {
+    const res = await llmOf(a).anthropic().messages.parse({
+      model: a.model,
+      max_tokens: 8000,
+      output_config: { effort: "low", format: zodOutputFormat(ExtractionSchema) },
+      system,
+      messages: [{ role: "user", content: user }],
+    });
+    if (res.stop_reason === "refusal") return [];
+    items = res.parsed_output?.claims ?? [];
+    usage = { input: inputTokens(res.usage), output: res.usage.output_tokens, cost: estimateCost(a.model, res.usage) };
+  } else {
+    const res = await complete(llmOf(a), {
+      model: a.model,
+      system,
+      user,
+      schema: { name: "claims", schema: EXTRACTION_JSON_SCHEMA },
+      maxTokens: 8000,
+    });
+    if (res.refused) return [];
+    items = ExtractionSchema.parse(parseJson(res.text)).claims;
+    usage = { input: res.usage.inputTokens, output: res.usage.outputTokens, cost: res.usage.costUsd };
+  }
 
   const claims: Claim[] = [];
   for (const item of items) {
@@ -82,7 +136,7 @@ export async function extractClaims(a: ExtractArgs): Promise<Claim[]> {
   }
 
   // Split the extraction call's cost evenly across the claims it produced.
-  spreadUsage(claims, inputTokens(res.usage), res.usage.output_tokens, estimateCost(a.model, res.usage));
+  spreadUsage(claims, usage.input, usage.output, usage.cost);
   return claims.map((c) => db.getClaim(c.id)!);
 }
 
@@ -184,8 +238,7 @@ type VerdictInput = {
   sources: { url: string; title: string; quote: string; stance: Source["stance"] }[];
 };
 
-export interface VerifyArgs {
-  client: Anthropic;
+export interface VerifyArgs extends WithLlm {
   model: string;
   claim: Claim;
   context: string;
@@ -195,7 +248,8 @@ export interface VerifyArgs {
   log?: Anthropic.Message[];
 }
 
-export async function verifyClaim({ client, model, claim, context, force, log }: VerifyArgs): Promise<Claim> {
+export async function verifyClaim(args: VerifyArgs): Promise<Claim> {
+  const { model, claim, context, force, log } = args;
   // Copy a trustworthy, fresh verdict for the same proposition instead of searching again.
   const prior = force ? null : reusableVerdict(claim);
   if (prior) return copyVerdict(claim, prior);
@@ -217,8 +271,34 @@ export async function verifyClaim({ client, model, claim, context, force, log }:
   let nudged = false;
 
   try {
+    if (providerOf(model) !== "anthropic") {
+      // Other providers research with their own web search and write the verdict out; a second,
+      // structured call turns that write-up into the record.
+      const llm = llmOf(args);
+      const found = await research(llm, {
+        model,
+        system: verifierSystem(claim.strictness, today, "notes"),
+        user: verifierUser(claim.claim, claim.quote, context),
+        maxSearches,
+      });
+      found.retrievedUrls.forEach((u) => retrievedUrls.add(u));
+      found.citedText.forEach((t, u) => citedText.set(u, t));
+      const record = await complete(llm, {
+        model,
+        system: VERDICT_RECORD_SYSTEM,
+        user: verdictRecordUser(found.text, [...found.retrievedUrls]),
+        schema: { name: "verdict", schema: VERDICT_TOOL.input_schema as Record<string, unknown> },
+        maxTokens: 4000,
+      });
+      usageIn = found.usage.inputTokens + record.usage.inputTokens;
+      usageOut = found.usage.outputTokens + record.usage.outputTokens;
+      searches = found.usage.searches;
+      cost = found.usage.costUsd + record.usage.costUsd;
+      if (!found.text.trim() || record.refused) throw new Error("The verifier model declined to check this claim.");
+      verdict = parseJson(record.text) as VerdictInput;
+    }
     for (let turn = 0; turn < 6 && !verdict; turn++) {
-      const res = await client.messages.create({
+      const res = await llmOf(args).anthropic().messages.create({
         model,
         max_tokens: 16000,
         output_config: { effort: "low" },
@@ -300,8 +380,7 @@ export async function verifyClaim({ client, model, claim, context, force, log }:
  * Once every claim in a message is checked, write a one-line digest of the notable problems
  * (or clear it when there are none) and store it on the message.
  */
-export async function summarizeMessage(opts: {
-  client: Anthropic;
+export async function summarizeMessage(opts: WithLlm & {
   model: string;
   messageId: string;
   minImportance: Importance;
@@ -314,20 +393,27 @@ export async function summarizeMessage(opts: {
     return null;
   }
   try {
-    const res = await opts.client.messages.create({
-      model: opts.model,
-      max_tokens: 2000,
-      output_config: { effort: "low" },
-      system: SUMMARY_SYSTEM,
-      messages: [{ role: "user", content: summaryUser(problems) }],
-    });
-    db.addCheckUsage(opts.messageId, inputTokens(res.usage) + res.usage.output_tokens, estimateCost(opts.model, res.usage));
-    const text = res.content
-      .flatMap((b) => (b.type === "text" ? [b.text] : []))
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (res.stop_reason === "refusal" || !text) return null;
+    let text: string;
+    let refused: boolean;
+    if (providerOf(opts.model) === "anthropic") {
+      const res = await llmOf(opts).anthropic().messages.create({
+        model: opts.model,
+        max_tokens: 2000,
+        output_config: { effort: "low" },
+        system: SUMMARY_SYSTEM,
+        messages: [{ role: "user", content: summaryUser(problems) }],
+      });
+      db.addCheckUsage(opts.messageId, inputTokens(res.usage) + res.usage.output_tokens, estimateCost(opts.model, res.usage));
+      text = res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ");
+      refused = res.stop_reason === "refusal";
+    } else {
+      const res = await complete(llmOf(opts), { model: opts.model, system: SUMMARY_SYSTEM, user: summaryUser(problems), maxTokens: 2000 });
+      db.addCheckUsage(opts.messageId, res.usage.inputTokens + res.usage.outputTokens, res.usage.costUsd);
+      text = res.text;
+      refused = res.refused;
+    }
+    text = text.replace(/\s+/g, " ").trim();
+    if (refused || !text) return null;
     db.setCheckSummary(opts.messageId, text);
     return text;
   } catch (err) {
@@ -395,7 +481,7 @@ async function triage(cfg: TriageConfig, claims: Claim[], context: string, emit:
  * completed passage and `finish` once the message is done; every claim update goes to `emit`.
  */
 export function createPipeline(opts: {
-  client: Anthropic;
+  llm: Llm;
   model: string;
   strictness: Strictness;
   triage: TriageConfig;
@@ -403,20 +489,27 @@ export function createPipeline(opts: {
   messageId: string;
   userQuestion: string;
   emit: (claim: Claim) => void;
+  /** Called with the number of passages currently being scanned for claims. */
+  onExtracting?: (active: number) => void;
 }) {
   const limit = semaphore(4);
   const tasks: Promise<unknown>[] = [];
+  let extracting = 0;
+  const setExtracting = (delta: number) => opts.onExtracting?.((extracting += delta));
 
   function addPassage(passage: string, passageOffset: number, replySoFar: string) {
     if (!passage.trim()) return;
     tasks.push(
       (async () => {
         let claims: Claim[];
+        setExtracting(1);
         try {
           claims = await extractClaims({ ...opts, passage, passageOffset, replySoFar });
         } catch (err) {
           console.error("extraction failed:", describeError(err));
           return;
+        } finally {
+          setExtracting(-1);
         }
         claims.forEach(opts.emit);
 

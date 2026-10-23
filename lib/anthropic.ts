@@ -1,32 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { priceOf } from "./models";
+import type { ToolActivity } from "./types";
 
-/**
- * Build a client from the key the browser sent. The key is used for this request only,
- * never stored or logged. Falls back to the server's ANTHROPIC_API_KEY for local dev.
- */
-export function clientFromRequest(req: Request): Anthropic {
-  const key = req.headers.get("x-anthropic-key")?.trim() || process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new MissingKeyError();
-  return new Anthropic({ apiKey: key, maxRetries: 3 });
-}
-
-export class MissingKeyError extends Error {
-  constructor() {
-    super("No Anthropic API key. Add one in Settings.");
-  }
-}
-
-// USD per million tokens. Estimates for display only: check current pricing before relying on them.
-const PRICES: Record<string, { input: number; output: number }> = {
-  "claude-opus-5-5": { input: 4, output: 20 },
-  "claude-sonnet-5-5": { input: 2, output: 10 },
-  "claude-haiku-5-5": { input: 0.1, output: 0.5 },
-};
 const WEB_SEARCH_USD = 0.01; // per search
 
 export function estimateCost(model: string, usage: Anthropic.Usage | undefined): number {
   if (!usage) return 0;
-  const p = PRICES[model] ?? PRICES["claude-sonnet-5-5"];
+  const p = priceOf(model);
   const input =
     usage.input_tokens +
     (usage.cache_creation_input_tokens ?? 0) * 1.25 +
@@ -48,10 +28,29 @@ export function webSearchTool(model: string, maxUses: number) {
   return { type: "web_search_20250305" as const, name: "web_search" as const, max_uses: maxUses };
 }
 
-export function describeError(err: unknown): string {
-  if (err instanceof Anthropic.AuthenticationError) return "Invalid Anthropic API key.";
-  if (err instanceof Anthropic.RateLimitError) return "Rate limited by the Anthropic API. Try again shortly.";
-  if (err instanceof Anthropic.APIError) return `Anthropic API error (${err.status ?? "network"}): ${err.message}`;
-  if (err instanceof Error) return err.message;
-  return String(err);
+/** Tools for the main chat model: web search, web fetch and code execution, all run by Anthropic. */
+export function mainTools(model: string) {
+  const dynamic = /opus|sonnet/.test(model);
+  return [
+    webSearchTool(model, 8),
+    dynamic
+      ? { type: "web_fetch_20260209" as const, name: "web_fetch" as const, max_uses: 8 }
+      : { type: "web_fetch_20250910" as const, name: "web_fetch" as const, max_uses: 8 },
+    { type: "code_execution_20260120" as const, name: "code_execution" as const },
+  ];
+}
+
+/** One line describing a server tool call, from its streamed JSON input. */
+export function describeToolCall(name: string, json: string, at: number): ToolActivity {
+  let input: Record<string, unknown> = {};
+  try {
+    input = JSON.parse(json || "{}");
+  } catch {
+    // Partial or invalid input: fall back to the tool name.
+  }
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  if (name === "web_search") return { kind: "search", label: str(input.query) || "web search", at };
+  if (name === "web_fetch") return { kind: "fetch", label: str(input.url) || "web page", at };
+  const code = str(input.command) || str(input.code) || str(input.path) || name;
+  return { kind: "code", label: code.split("\n")[0].slice(0, 120), at };
 }

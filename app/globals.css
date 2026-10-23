@@ -392,6 +392,72 @@ kbd {
   margin-bottom: 28vh;
 }
 
+/* ---------- question rail (left edge) ---------- */
+
+.rail {
+  position: fixed;
+  left: 246px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 6px 8px 6px 4px;
+  border-radius: 8px;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.rail__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.rail__item i {
+  flex: none;
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--rule);
+  transition: width 0.15s, background 0.15s;
+}
+.rail__item.is-current i {
+  width: 16px;
+  background: var(--ink);
+}
+.rail__item span {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transition: max-width 0.2s, opacity 0.15s;
+}
+.rail:hover,
+.rail:has(:focus-visible) {
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--rule), 0 8px 24px rgba(13, 17, 23, 0.08);
+}
+.rail:hover .rail__item span,
+.rail:has(:focus-visible) .rail__item span {
+  max-width: 260px;
+  opacity: 1;
+}
+.rail__item:hover {
+  color: var(--ink);
+}
+.rail__item:hover i {
+  background: var(--accent);
+}
+
 /* ---------- thread ---------- */
 
 .thread {
@@ -476,6 +542,104 @@ kbd {
   margin-top: 10px;
   color: var(--muted);
 }
+/* Copy sits at the far right of the footer. */
+.copy {
+  margin-left: auto;
+  cursor: pointer;
+  color: var(--faint);
+}
+.copy:hover {
+  color: var(--ink);
+}
+.feedback + .copy {
+  margin-left: 0;
+}
+
+/* ---------- model reasoning (collapsed above the answer) ---------- */
+
+.thinking {
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.thinking__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.thinking__label {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.thinking__live {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+  color: var(--faint);
+}
+.thinking__chev {
+  flex: none;
+  font-size: 10px;
+  color: var(--faint);
+}
+.thinking__head:hover,
+.thinking__head:hover .thinking__chev {
+  color: var(--ink);
+}
+.thinking__body {
+  margin-top: 6px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--rule);
+  color: var(--text-2);
+  line-height: 1.55;
+}
+.activity {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.activity__kind {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.activity__results {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.activity a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.activity a:hover {
+  text-decoration: underline;
+}
+.thinking__body p {
+  margin: 0 0 8px;
+}
+
 .tally {
   display: inline-flex;
   align-items: center;
@@ -951,6 +1115,11 @@ mark.claim.is-active {
   font-size: 10.5px;
   color: var(--faint);
   pointer-events: auto;
+  /* Solid, so margin notes scrolling underneath don't show through. */
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 5px 8px;
 }
 .usage__row {
   display: grid;
@@ -1352,6 +1521,9 @@ mark.claim.is-active {
   .app {
     grid-template-columns: minmax(0, 1fr);
   }
+  .rail {
+    left: 2px;
+  }
   .sidebar {
     position: fixed;
     left: 0;
@@ -1414,4 +1586,83 @@ mark.claim.is-active {
   align-items: center;
   gap: 5px;
   cursor: pointer;
+}
+
+/* Land jumps from the question rail below the sticky top bar. */
+.turn--user {
+  scroll-margin-top: 64px;
+}
+
+.question__time {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--faint);
+}
+/* Reasoning time and copy sit together at the far right of the footer. */
+.turn__time {
+  margin-left: auto;
+  color: var(--faint);
+}
+.turn__time + .copy,
+.feedback + .turn__time {
+  margin-left: 0;
+}
+
+/* ---------- settings: keys and spend ---------- */
+
+.spend {
+  margin: -4px 0 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.keys {
+  list-style: none;
+  margin: 2px 0 8px;
+  padding: 0;
+  font-size: 12.5px;
+}
+.keys li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+}
+.keys__provider {
+  min-width: 110px;
+}
+.keys code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.keys .link {
+  margin-left: auto;
+  font-size: 11.5px;
+}
+.keys__add {
+  display: flex;
+  gap: 6px;
+}
+.keys__add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dialog__actions {
+  align-items: center;
+}
+.dialog__actions > .muted {
+  margin-right: auto;
+}
+.about p {
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.about p.muted {
+  font-size: 13px;
+}
+.about .dialog__actions {
+  margin-top: 18px;
 }

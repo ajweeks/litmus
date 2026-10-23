@@ -119,6 +119,22 @@ export interface ChatMessage {
   createdAt: number;
   /** What this reply cost (assistant messages only; absent until stored). */
   usage?: MessageUsage;
+  /** Summarised reasoning the model did before answering, if any. */
+  thinking?: string | null;
+  /** How long it thought, in milliseconds. */
+  thinkingMs?: number | null;
+  /** Tool calls the model made while answering (searches, page fetches, code). */
+  activity?: ToolActivity[];
+}
+
+export interface ToolActivity {
+  kind: "search" | "fetch" | "code";
+  /** The query, URL or first line of code. */
+  label: string;
+  /** For searches: the results returned. */
+  results?: { title: string; url: string }[];
+  /** Length of the thinking text when the call was made, to order calls against reasoning. */
+  at: number;
 }
 
 export interface MessageUsage {
@@ -160,6 +176,8 @@ export interface Settings {
   auditRate: number;
   /** Queue unsent corrections to go out with the next message (the button still sends them right away). */
   queueCorrections: boolean;
+  /** Let the main model search the web, fetch pages and run code. */
+  mainTools: boolean;
   /** Also show supported claims in the margin, not only problems. */
   showSupported: boolean;
 }
@@ -173,11 +191,10 @@ export const DEFAULT_SETTINGS: Settings = {
   triageThreshold: 0.9,
   auditRate: 0.1,
   queueCorrections: true,
+  mainTools: true,
   showSupported: false,
 };
 
-export const MAIN_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
-export const CHECKER_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5"];
 
 /** NDJSON events streamed from POST /api/chat. */
 export type StreamEvent =
@@ -190,8 +207,12 @@ export type StreamEvent =
       fedBackClaimIds: string[];
     }
   | { type: "text"; delta: string }
+  | { type: "thinking"; delta: string }
+  | { type: "activity"; items: ToolActivity[] }
   | { type: "message_done"; message: ChatMessage }
   | { type: "claim"; claim: Claim }
+  /** How many passages of a reply are being scanned for claims right now. */
+  | { type: "extracting"; messageId: string; active: number }
   | { type: "summary"; message: ChatMessage }
   | { type: "error"; message: string }
   | { type: "end" };

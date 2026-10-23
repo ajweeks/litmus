@@ -1,35 +1,93 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Importance, Settings, Strictness } from "@/lib/types";
-import { CHECKER_MODELS, MAIN_MODELS } from "@/lib/types";
 import { DECISION_MODELS } from "@/lib/triage";
+import { MODELS, providerOf } from "@/lib/models";
+import type { ApiKeys, Provider } from "@/lib/providers";
+import { PROVIDER_IDS, PROVIDERS } from "@/lib/providers";
+import * as store from "@/lib/chatStore";
+import { KeysField } from "./KeysField";
+import { modelLabel } from "./UsageMeter";
+import { formatCost } from "./status";
 
-const STRICTNESS: { value: Strictness; label: string; hint: string }[] = [
-  { value: "facts", label: "Facts", hint: "Dates, numbers, names, scientific and technical facts." },
-  { value: "judgments", label: "Facts + judgments", hint: "Also contestable claims presented as settled." },
-  { value: "critique", label: "Full critique", hint: "Also misleading framing and missing caveats." },
+
+/** One scale for both what gets checked and how big an error must be before it's shown. */
+const LEVELS: { strictness: Strictness; minImportance: Importance; label: string; hint: string }[] = [
+  { strictness: "facts", minImportance: "moderate", label: "Facts", hint: "Dates, numbers, names, scientific and technical facts. The default." },
+  { strictness: "judgments", minImportance: "moderate", label: "Facts and judgments", hint: "Also contestable claims presented as settled." },
+  { strictness: "critique", minImportance: "minor", label: "Full critique", hint: "Also misleading framing, missing caveats and nitpicks." },
 ];
 
-const IMPORTANCE: { value: Importance; label: string }[] = [
-  { value: "major", label: "Only major errors" },
-  { value: "moderate", label: "Moderate and major (default)" },
-  { value: "minor", label: "Everything, including nitpicks" },
-];
+/** The level a saved pair of settings corresponds to (settings from before the merge may not match exactly). */
+function levelOf(s: Settings): number {
+  const exact = LEVELS.findIndex((l) => l.strictness === s.strictness && l.minImportance === s.minImportance);
+  return exact >= 0 ? exact : LEVELS.findIndex((l) => l.strictness === s.strictness);
+}
+
+/** Models grouped by provider; providers without a key are listed but can't be picked. */
+function ModelSelect({
+  value,
+  use,
+  usable,
+  onChange,
+}: {
+  value: string;
+  use: "main" | "checker";
+  usable: Set<Provider>;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
+      {PROVIDER_IDS.map((p) => {
+        const models = MODELS.filter((m) => m.provider === p && m[use]);
+        if (!models.length) return null;
+        return (
+          <optgroup key={p} label={usable.has(p) ? PROVIDERS[p].label : `${PROVIDERS[p].label} (add a key)`}>
+            {models.map((m) => (
+              <option key={m.id} value={m.id} disabled={!usable.has(p)}>
+                {modelLabel(m.id)}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+    </select>
+  );
+}
 
 interface Props {
   settings: Settings;
-  apiKey: string;
-  openrouterKey: string;
-  onSave: (s: Settings, apiKey: string, openrouterKey: string) => void;
+  keys: ApiKeys;
+  onSave: (s: Settings, keys: ApiKeys) => void;
   onClose: () => void;
 }
 
-export function SettingsDialog({ settings, apiKey, openrouterKey, onSave, onClose }: Props) {
+export function SettingsDialog({ settings, keys: savedKeys, onSave, onClose }: Props) {
   const [s, setS] = useState(settings);
-  const [key, setKey] = useState(apiKey);
-  const [orKey, setOrKey] = useState(openrouterKey);
+  const [keys, setKeys] = useState(savedKeys);
+  const total = store.totalUsage();
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((prev) => ({ ...prev, [k]: v }));
+  const usable = new Set(Object.keys(keys) as Provider[]);
+
+  // When keys change, move a model whose provider has no key to the first one that does.
+  const changeKeys = (next: ApiKeys) => {
+    setKeys(next);
+    const ok = new Set(Object.keys(next) as Provider[]);
+    const fallback = (use: "main" | "checker", current: string) =>
+      ok.has(providerOf(current)) ? current : (MODELS.find((m) => m[use] && ok.has(m.provider))?.id ?? current);
+    setS((prev) => ({ ...prev, mainModel: fallback("main", prev.mainModel), checkerModel: fallback("checker", prev.checkerModel) }));
+  };
+
+  // Every change is saved as it's made.
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    onSave(s, keys);
+  }, [s, keys]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -38,55 +96,50 @@ export function SettingsDialog({ settings, apiKey, openrouterKey, onSave, onClos
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();
-          onSave(s, key, orKey);
+          onClose();
         }}
       >
         <h2>Settings</h2>
+        {total.chats > 0 && (
+          <p className="spend" title="Estimated from list prices, across the chats saved in this browser">
+            Spent {formatCost(total.mainUsd + total.checkUsd)} over {total.chats} chat
+            {total.chats === 1 ? "" : "s"}: {formatCost(total.mainUsd)} answering, {formatCost(total.checkUsd)} checking.
+          </p>
+        )}
 
-        <label className="field">
-          <span>Anthropic API key</span>
-          <input
-            type="password"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            placeholder="sk-ant-…"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <small>
-            Kept in this browser only and sent with each request. The server uses it for that request and never
-            stores it.
-          </small>
-        </label>
+        <KeysField keys={keys} onChange={changeKeys} />
 
         <div className="row">
           <label className="field">
             <span>Chat model</span>
-            <select value={s.mainModel} onChange={(e) => set("mainModel", e.target.value)}>
-              {MAIN_MODELS.map((m) => (
-                <option key={m}>{m}</option>
-              ))}
-            </select>
+            <ModelSelect value={s.mainModel} use="main" usable={usable} onChange={(v) => set("mainModel", v)} />
           </label>
           <label className="field">
             <span>Fact-check model</span>
-            <select value={s.checkerModel} onChange={(e) => set("checkerModel", e.target.value)}>
-              {CHECKER_MODELS.map((m) => (
-                <option key={m}>{m}</option>
-              ))}
-            </select>
+            <ModelSelect value={s.checkerModel} use="checker" usable={usable} onChange={(v) => set("checkerModel", v)} />
           </label>
         </div>
 
+        <label className="toggle">
+          <input type="checkbox" checked={s.mainTools} onChange={(e) => set("mainTools", e.target.checked)} />
+          <span>
+            Let the chat model use tools
+            <small>
+              Web search, reading web pages and running code, as far as the provider offers them (DeepSeek and Z.ai
+              don&rsquo;t run code).
+            </small>
+          </span>
+        </label>
+
         <fieldset className="field">
-          <span>What to check</span>
-          {STRICTNESS.map((o) => (
-            <label key={o.value} className="radio">
+          <span>What to flag</span>
+          {LEVELS.map((o, i) => (
+            <label key={o.label} className="radio">
               <input
                 type="radio"
-                name="strictness"
-                checked={s.strictness === o.value}
-                onChange={() => set("strictness", o.value)}
+                name="level"
+                checked={levelOf(s) === i}
+                onChange={() => setS((prev) => ({ ...prev, strictness: o.strictness, minImportance: o.minImportance }))}
               />
               <span>
                 {o.label}
@@ -95,18 +148,6 @@ export function SettingsDialog({ settings, apiKey, openrouterKey, onSave, onClos
             </label>
           ))}
         </fieldset>
-
-        <label className="field">
-          <span>Corrections to show</span>
-          <select value={s.minImportance} onChange={(e) => set("minImportance", e.target.value as Importance)}>
-            {IMPORTANCE.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <small>Smaller errors are hidden, left out of the summary and not sent to the model.</small>
-        </label>
 
         <h3>Triage (experimental)</h3>
         <label className="field">
@@ -127,7 +168,8 @@ export function SettingsDialog({ settings, apiKey, openrouterKey, onSave, onClos
           </datalist>
           <small>
             A decision model (Jev, Decider, Drex, ...) gives each claim a probability of being accurate. Only claims
-            below the threshold get the web check. Uses OpenRouter&rsquo;s Decisions API.
+            below the threshold get the web check. Uses OpenRouter&rsquo;s Decisions API, so it needs an OpenRouter
+            key above.
           </small>
         </label>
         {s.triageModel && (
@@ -158,17 +200,6 @@ export function SettingsDialog({ settings, apiKey, openrouterKey, onSave, onClos
                 <small>% of skips, checked at random</small>
               </label>
             </div>
-            <label className="field">
-              <span>OpenRouter API key</span>
-              <input
-                type="password"
-                value={orKey}
-                onChange={(e) => setOrKey(e.target.value)}
-                placeholder="sk-or-…"
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
           </>
         )}
 
@@ -194,11 +225,9 @@ export function SettingsDialog({ settings, apiKey, openrouterKey, onSave, onClos
         </label>
 
         <div className="dialog__actions">
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            Cancel
-          </button>
+          <span className="muted small">Changes save automatically.</span>
           <button type="submit" className="btn">
-            Save
+            Done
           </button>
         </div>
       </form>

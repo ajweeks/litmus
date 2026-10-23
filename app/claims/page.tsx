@@ -5,6 +5,8 @@ import Link from "next/link";
 import type { ChatSummary, Claim, ClaimCategory, ClaimStatus, Importance } from "@/lib/types";
 import { isReusable } from "@/lib/types";
 import { Bold } from "@/components/Bold";
+import * as store from "@/lib/chatStore";
+import { fuzzyMatcher } from "@/lib/fuzzy";
 import { STATUS, formatCost, hostname } from "@/components/status";
 import { withTextFragment } from "@/lib/sources";
 
@@ -60,12 +62,11 @@ export default function ClaimsPage() {
       setF((prev) => ({ ...prev, id, showSuperseded: true }));
       setOpen(id);
     }
-    fetch("/api/claims?limit=5000")
-      .then((r) => r.json())
-      .then(setClaims);
-    fetch("/api/chats")
-      .then((r) => r.json())
-      .then(setChats);
+    // Only this browser's chats: the claims come from the local chat store, not the server.
+    store.load().then(() => {
+      setClaims(store.allClaims());
+      setChats(store.listChats());
+    });
   }, []);
 
   const models = useMemo(
@@ -81,17 +82,13 @@ export default function ClaimsPage() {
   };
 
   const shown = useMemo(() => {
-    const q = f.q.trim().toLowerCase();
+    const matches = fuzzyMatcher(f.q);
     return (claims ?? []).filter(
       (c) =>
         (!f.id || c.id === f.id) &&
         (f.showSuperseded || !c.supersededBy) &&
         (!f.importance || c.importance === f.importance) &&
-        (!q ||
-          c.claim.toLowerCase().includes(q) ||
-          c.quote.toLowerCase().includes(q) ||
-          (c.summary ?? "").toLowerCase().includes(q) ||
-          c.sources.some((s) => s.url.toLowerCase().includes(q))) &&
+        matches(c.claim, c.quote, c.summary, c.correction, ...c.sources.map((s) => `${s.url} ${s.title}`)) &&
         (!f.status || c.status === f.status) &&
         (!f.category || c.category === f.category) &&
         (!f.model || c.verifierModel === f.model) &&
@@ -107,12 +104,15 @@ export default function ClaimsPage() {
   );
   const active = JSON.stringify(f) !== JSON.stringify(EMPTY);
 
-  // Export links carry the filters the API understands.
-  const exportQuery = new URLSearchParams(
-    Object.entries({ q: f.q.trim(), status: f.status, category: f.category, model: f.model, chatId: f.chatId }).filter(
-      ([, v]) => v,
-    ),
-  ).toString();
+  /** Download the claims currently shown, as a JSON array or one claim per line. */
+  const download = (format: "json" | "jsonl") => {
+    const text = format === "json" ? JSON.stringify(shown, null, 2) : shown.map((c) => JSON.stringify(c)).join("\n") + "\n";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: format === "json" ? "application/json" : "application/x-ndjson" }));
+    a.download = `claims.${format}`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 
   return (
     <div className="dbpage">
@@ -122,12 +122,12 @@ export default function ClaimsPage() {
         </Link>
         <h1>Claims database</h1>
         <div className="dbpage__tools">
-          <a className="btn btn--ghost btn--small" href={`/api/claims?format=json&${exportQuery}`}>
+          <button className="btn btn--ghost btn--small" onClick={() => download("json")} disabled={!shown.length}>
             Export JSON
-          </a>
-          <a className="btn btn--ghost btn--small" href={`/api/claims?format=jsonl&${exportQuery}`}>
+          </button>
+          <button className="btn btn--ghost btn--small" onClick={() => download("jsonl")} disabled={!shown.length}>
             JSONL
-          </a>
+          </button>
         </div>
       </header>
 
@@ -247,7 +247,7 @@ export default function ClaimsPage() {
                       <td className="num" title={freshness(c).title}>
                         {freshness(c).label}
                       </td>
-                      <td className="num">{c.relatedIds.length || "–"}</td>
+                      <td className="num">{c.relatedIds.filter((id) => byId.has(id)).length || "–"}</td>
                     </tr>
                     {open === c.id && (
                       <tr className="dbtable__detail">
@@ -300,10 +300,11 @@ function ClaimDetail({
           ))}
         </ul>
       )}
-      {c.relatedIds.length > 0 && (
+      {/* Related claims from other people's chats are in the shared cache but not shown here. */}
+      {c.relatedIds.some((id) => byId.has(id)) && (
         <div className="cdetail__related">
           <span className="muted small">Related</span>
-          {c.relatedIds.map((id) => {
+          {c.relatedIds.filter((id) => byId.has(id)).map((id) => {
             const r = byId.get(id);
             return (
               <button key={id} className="link" onClick={() => onPick(id)}>

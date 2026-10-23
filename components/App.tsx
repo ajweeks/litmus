@@ -1,39 +1,45 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import {
-  authHeaders,
-  loadApiKey,
-  loadOpenRouterKey,
-  loadSettings,
-  saveApiKey,
-  saveOpenRouterKey,
-  saveSettings,
-  streamChat,
-} from "@/lib/client";
-import type { ChatDetail, ChatMessage, ChatSummary, Claim, Settings, StreamEvent } from "@/lib/types";
+import * as store from "@/lib/chatStore";
+import { authHeaders, chatPayload, loadKeys, loadSettings, saveKeys, saveSettings, streamChat } from "@/lib/client";
+import type { ApiKeys } from "@/lib/providers";
+import { PROVIDERS } from "@/lib/providers";
+import type { ChatDetail, ChatMessage, Claim, Settings, StreamEvent } from "@/lib/types";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import { MessageView } from "./MessageView";
-import { UsageMeter } from "./UsageMeter";
+import { TurnRail } from "./TurnRail";
+import { UsageMeter, modelLabel } from "./UsageMeter";
+import { AboutDialog } from "./AboutDialog";
+import { providerOf } from "@/lib/models";
 import { SettingsDialog } from "./SettingsDialog";
 import { isPending } from "./status";
 
+const NO_MESSAGES: ChatMessage[] = [];
+
 export function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [apiKey, setApiKey] = useState("");
-  const [serverKey, setServerKey] = useState(true);
+  const [keys, setKeys] = useState<ApiKeys>({});
+  /** Keys are read from localStorage after mount; don't nag about missing ones before that. */
+  const [keysLoaded, setKeysLoaded] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const [chats, setChats] = useState<ChatSummary[]>([]);
+  // Chats live in this browser (lib/chatStore.ts); re-render whenever the store changes.
+  const storeVersion = useSyncExternalStore(store.subscribe, store.getVersion, () => 0);
   const [chatId, setChatId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [claims, setClaims] = useState<Map<string, Claim>>(new Map());
+  const chats = useMemo(() => store.listChats(), [storeVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const detail = chatId ? store.getChat(chatId) : undefined;
+  const messages = detail?.messages ?? NO_MESSAGES;
+  const claims = useMemo(() => new Map((detail?.claims ?? []).map((c) => [c.id, c])), [detail]);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** Answers whose claim extraction/checking stream is still open (so "no claims" isn't premature). */
   const [analysingIds, setAnalysingIds] = useState<Set<string>>(new Set());
+  /** Answers with a passage currently being scanned for claims (this starts while the reply streams). */
+  const [extractingIds, setExtractingIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [activeClaimId, setActiveClaimId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -41,118 +47,104 @@ export function App() {
   const openStreams = useRef(0);
   /** ID of the send that currently owns the busy/streaming state. */
   const currentSend = useRef<string | null>(null);
-  const chatIdRef = useRef<string | null>(null);
-  chatIdRef.current = chatId;
   /** Whether the view follows new content. Any upward scroll gesture detaches it; reaching the bottom re-attaches. */
   const followRef = useRef(true);
 
   // ---------- loading ----------
 
-  const refreshChats = useCallback(async () => {
-    const res = await fetch("/api/chats");
-    if (res.ok) setChats(await res.json());
-  }, []);
-
-  const loadChat = useCallback(async (id: string, quiet = false) => {
-    const res = await fetch(`/api/chats/${id}`);
-    if (!res.ok) {
-      if (!quiet) setError("Chat not found.");
-      return;
-    }
-    const d: ChatDetail = await res.json();
-    if (chatIdRef.current !== id && quiet) return;
-    setChatId(id);
-    setMessages(d.messages);
-    setClaims(new Map(d.claims.map((c) => [c.id, c])));
-  }, []);
-
   useEffect(() => {
     setSettings(loadSettings());
-    setApiKey(loadApiKey());
-    refreshChats();
-    fetch("/api/config")
-      .then((r) => r.json())
-      .then((c) => setServerKey(c.serverKey));
+    setKeys(loadKeys());
+    setKeysLoaded(true);
     const id = new URLSearchParams(location.search).get("c");
-    if (id) loadChat(id);
-  }, [refreshChats, loadChat]);
+    store.load().then(() => {
+      if (!id) return;
+      if (store.getChat(id)) setChatId(id);
+      else setError("That chat isn't saved in this browser.");
+    });
+  }, []);
 
   const selectChat = (id: string | null) => {
     setSidebarOpen(false);
     setActiveClaimId(null);
     setError(null);
-    // A reply still streaming elsewhere keeps going on the server; don't block this chat on it.
+    // A reply still streaming elsewhere keeps going and is still saved; don't block this chat on it.
     currentSend.current = null;
     setBusy(false);
     setStreamingId(null);
     history.replaceState(null, "", id ? `/?c=${id}` : "/");
-    if (id) loadChat(id);
-    else {
-      setChatId(null);
-      setMessages([]);
-      setClaims(new Map());
-    }
+    setChatId(id);
   };
 
-  // If a reload or a dropped connection left claims mid-check, poll until the server finishes them.
-  const anyPending = useMemo(() => [...claims.values()].some((c) => isPending(c.status)), [claims]);
+  // If a reload or a dropped connection left claims mid-check, ask the server for them until they finish.
+  const pendingIds = useMemo(
+    () => [...claims.values()].filter((c) => isPending(c.status)).map((c) => c.id),
+    [claims],
+  ).join(",");
   useEffect(() => {
-    if (!anyPending || !chatId) return;
-    const t = setInterval(() => {
-      if (openStreams.current === 0) loadChat(chatId, true);
+    if (!pendingIds || !chatId) return;
+    const id = chatId;
+    const t = setInterval(async () => {
+      if (openStreams.current > 0) return;
+      const res = await fetch(`/api/claims?ids=${pendingIds}`).catch(() => null);
+      if (!res?.ok) return;
+      const fresh = (await res.json()) as Claim[];
+      const found = new Set(fresh.map((c) => c.id));
+      store.updateChat(id, (d) =>
+        // A claim the server no longer has was interrupted (e.g. by a restart) and won't finish.
+        d.claims
+          .filter((c) => pendingIds.includes(c.id) && !found.has(c.id))
+          .map((c): Claim => ({ ...c, status: "error", error: "The check was interrupted. Re-check to try again." }))
+          .concat(fresh)
+          .reduce(store.upsertClaim, d),
+      );
     }, 4000);
     return () => clearInterval(t);
-  }, [anyPending, chatId, loadChat]);
+  }, [pendingIds, chatId]);
 
   // ---------- sending ----------
-
-  const upsertClaim = (c: Claim) => setClaims((prev) => new Map(prev).set(c.id, c));
 
   const send = async (content: string, correctionRequest = false) => {
     if (busy) return;
     setError(null);
     setBusy(true);
     followRef.current = true;
-    const tempId = `tmp_${Date.now()}`;
-    if (!correctionRequest)
-      setMessages((m) => [
-        ...m,
-        {
-          id: tempId,
-          chatId: chatId ?? "",
-          role: "user",
-          content,
-          kind: "normal",
-          model: null,
-          checkSummary: null,
-          createdAt: Date.now(),
-        },
-      ]);
-    const startedIn = chatId;
+    const now = Date.now();
+    // A new chat gets its id here, so every event can be stored against it from the start.
+    const id = chatId ?? `chat_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const chat = store.getChat(id)?.chat ?? { id, title: content.slice(0, 80), createdAt: now, updatedAt: now };
+    const sent = chatPayload(store.getChat(id) ?? { chat, messages: [], claims: [] });
+    const update = (fn: (d: ChatDetail) => ChatDetail) => store.updateChat(id, fn, chat);
+    /** Apply `fn` to one message of this chat. */
+    const patchMessage = (messageId: string, fn: (m: ChatMessage) => ChatMessage) =>
+      update((d) => ({ ...d, messages: d.messages.map((m) => (m.id === messageId ? fn(m) : m)) }));
+
+    const tempId = `tmp_${now}`;
+    update((d) => ({
+      ...d,
+      chat: { ...d.chat, updatedAt: now },
+      messages: correctionRequest
+        ? d.messages
+        : [
+            ...d.messages,
+            { id: tempId, chatId: id, role: "user", content, kind: "normal", model: null, checkSummary: null, createdAt: now },
+          ],
+    }));
+    if (!chatId) {
+      history.replaceState(null, "", `/?c=${id}`);
+      setChatId(id);
+    }
     currentSend.current = tempId;
     openStreams.current++;
-
-    let streamChatId = startedIn;
     let assistantId: string | null = null;
 
+    // Every event is stored, even if the user has moved to another chat meanwhile.
     const onEvent = (e: StreamEvent) => {
-      // Ignore events for a chat the user has navigated away from (the server keeps saving them).
-      if (e.type === "meta") {
-        if (chatIdRef.current !== startedIn) return;
-        streamChatId = e.chatId;
-      } else if (chatIdRef.current !== streamChatId) return;
-
       switch (e.type) {
         case "meta": {
-          if (!startedIn) {
-            history.replaceState(null, "", `/?c=${e.chatId}`);
-            chatIdRef.current = e.chatId;
-            setChatId(e.chatId);
-            refreshChats();
-          }
           const placeholder: ChatMessage = {
             id: e.assistantMessageId,
-            chatId: e.chatId,
+            chatId: id,
             role: "assistant",
             content: "",
             kind: "normal",
@@ -160,47 +152,51 @@ export function App() {
             checkSummary: null,
             createdAt: Date.now(),
           };
-          setMessages((m) => [
-            ...m.filter((x) => x.id !== tempId),
-            e.userMessage,
-            ...(e.systemMessage ? [e.systemMessage] : []),
-            placeholder,
-          ]);
-          setStreamingId(e.assistantMessageId);
+          const fedBack = new Set(e.fedBackClaimIds);
+          update((d) => ({
+            ...d,
+            messages: [
+              ...d.messages.filter((x) => x.id !== tempId),
+              e.userMessage,
+              ...(e.systemMessage ? [e.systemMessage] : []),
+              placeholder,
+            ],
+            claims: d.claims.map((c) => (fedBack.has(c.id) ? { ...c, fedBackIn: e.systemMessage!.id } : c)),
+          }));
+          if (currentSend.current === tempId) setStreamingId(e.assistantMessageId);
           assistantId = e.assistantMessageId;
           setAnalysingIds((prev) => new Set(prev).add(e.assistantMessageId));
-          if (e.fedBackClaimIds.length)
-            setClaims((prev) => {
-              const next = new Map(prev);
-              for (const id of e.fedBackClaimIds) {
-                const c = next.get(id);
-                if (c) next.set(id, { ...c, fedBackIn: e.systemMessage!.id });
-              }
-              return next;
-            });
           break;
         }
+        case "activity":
+          if (assistantId) patchMessage(assistantId, (m) => ({ ...m, activity: e.items }));
+          break;
+        case "thinking":
+          if (assistantId) patchMessage(assistantId, (m) => ({ ...m, thinking: (m.thinking ?? "") + e.delta }));
+          break;
         case "text":
-          setMessages((m) => {
-            const last = m[m.length - 1];
-            if (!last || last.role !== "assistant") return m;
-            return [...m.slice(0, -1), { ...last, content: last.content + e.delta }];
-          });
+          if (assistantId) patchMessage(assistantId, (m) => ({ ...m, content: m.content + e.delta }));
           break;
         case "message_done":
-          setMessages((m) => m.map((x) => (x.id === e.message.id ? e.message : x)));
+          patchMessage(e.message.id, () => e.message);
           if (currentSend.current === tempId) {
             setStreamingId(null);
             setBusy(false);
           }
           break;
         case "claim":
-          upsertClaim(e.claim);
+          update((d) => store.upsertClaim(d, e.claim));
+          break;
+        case "extracting":
+          setExtractingIds((prev) => {
+            const next = new Set(prev);
+            if (e.active > 0) next.add(e.messageId);
+            else next.delete(e.messageId);
+            return next;
+          });
           break;
         case "summary":
-          setMessages((m) =>
-            m.map((x) => (x.id === e.message.id ? { ...x, checkSummary: e.message.checkSummary, usage: e.message.usage } : x)),
-          );
+          patchMessage(e.message.id, (m) => ({ ...m, checkSummary: e.message.checkSummary, usage: e.message.usage }));
           break;
         case "error":
           setError(e.message);
@@ -209,64 +205,91 @@ export function App() {
     };
 
     try {
-      await streamChat({ chatId: chatId ?? undefined, content, correctionRequest, settings }, onEvent);
+      await streamChat({ ...sent, content, correctionRequest, settings }, onEvent);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setMessages((m) => m.filter((x) => x.id !== tempId));
+      update((d) => ({ ...d, messages: d.messages.filter((x) => x.id !== tempId) }));
+      // Nothing was saved for a brand-new chat that failed outright.
+      if (!store.getChat(id)?.messages.length) {
+        store.deleteChat(id);
+        if (!chatId) selectChat(null);
+      }
       if (!correctionRequest) setDraft(content);
     } finally {
       openStreams.current--;
       if (assistantId) {
-        const id = assistantId;
-        setAnalysingIds((prev) => {
+        const done = assistantId;
+        const drop = (prev: Set<string>) => {
           const next = new Set(prev);
-          next.delete(id);
+          next.delete(done);
           return next;
-        });
+        };
+        setAnalysingIds(drop);
+        setExtractingIds(drop);
       }
       if (currentSend.current === tempId) {
         currentSend.current = null;
         setStreamingId(null);
         setBusy(false);
       }
-      refreshChats();
     }
   };
 
+  /** Both the chat model's and the checker's providers need a key before anything can be sent. */
+  const missingModel = [settings.mainModel, settings.checkerModel].find((m) => !keys[providerOf(m)]) ?? "";
+  const missing = providerOf(missingModel);
+  const hasKeys = !missingModel;
+
   const submit = () => {
     const text = draft.trim();
-    if (!text || busy) return;
+    if (!text || busy || !hasKeys) return;
     setDraft("");
     send(text);
   };
 
-  const recheck = async (id: string) => {
-    const c = claims.get(id);
-    if (!c) return;
-    upsertClaim({ ...c, status: "verifying" });
-    const res = await fetch(`/api/claims/${id}`, {
+  const recheck = async (claimId: string) => {
+    const c = claims.get(claimId);
+    if (!c || !chatId) return;
+    const id = chatId;
+    store.updateChat(id, (d) => store.upsertClaim(d, { ...c, status: "verifying" }));
+    const res = await fetch(`/api/claims/${claimId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ model: settings.checkerModel, minImportance: settings.minImportance }),
+      body: JSON.stringify({
+        model: settings.checkerModel,
+        minImportance: settings.minImportance,
+        ...chatPayload(store.getChat(id)!),
+      }),
     });
     if (res.ok) {
       const { claim, message } = (await res.json()) as { claim: Claim; message: ChatMessage | null };
-      upsertClaim(claim);
-      if (message)
-        setMessages((m) =>
-          m.map((x) => (x.id === message.id ? { ...x, checkSummary: message.checkSummary, usage: message.usage } : x)),
-        );
+      store.updateChat(id, (d) => ({
+        ...store.upsertClaim(d, claim),
+        messages: d.messages.map((x) =>
+          // The server only saw this request, so its check usage is what the summary just cost.
+          message && x.id === message.id
+            ? {
+                ...x,
+                checkSummary: message.checkSummary,
+                usage: x.usage && {
+                  ...x.usage,
+                  checkTokens: x.usage.checkTokens + (message.usage?.checkTokens ?? 0),
+                  checkCostUsd: x.usage.checkCostUsd + (message.usage?.checkCostUsd ?? 0),
+                },
+              }
+            : x,
+        ),
+      }));
     } else {
-      upsertClaim(c);
+      store.updateChat(id, (d) => store.upsertClaim(d, c));
       setError((await res.json().catch(() => ({}))).error ?? "Re-check failed.");
     }
   };
 
-  const deleteChat = async (id: string) => {
+  const deleteChat = (id: string) => {
     if (!confirm("Delete this chat and its claims?")) return;
-    await fetch(`/api/chats/${id}`, { method: "DELETE" });
+    store.deleteChat(id);
     if (id === chatId) selectChat(null);
-    refreshChats();
   };
 
   // Follow new content only while the user is at the bottom. Detaching on the gesture itself
@@ -355,6 +378,9 @@ export function App() {
           <button className="link" onClick={() => setShowSettings(true)}>
             Settings
           </button>
+          <button className="link" onClick={() => setShowAbout(true)}>
+            About
+          </button>
         </div>
       </aside>
       <div className="scrim" onClick={() => setSidebarOpen(false)} />
@@ -365,9 +391,9 @@ export function App() {
             ☰
           </button>
           <button className="topbar__mode" onClick={() => setShowSettings(true)}>
-            <span>{settings.mainModel}</span>
+            <span>{modelLabel(settings.mainModel)}</span>
             <span className="sep">→</span>
-            <span>checked by {settings.checkerModel}</span>
+            <span>checked by {modelLabel(settings.checkerModel)}</span>
             <span className="pill pill--mode">
               {{ facts: "facts", judgments: "facts + judgments", critique: "full critique" }[settings.strictness]}
             </span>
@@ -386,6 +412,7 @@ export function App() {
           </div>
         ) : (
           <div className="thread">
+            <TurnRail messages={messages} onJump={() => (followRef.current = false)} />
             {messages.map((m) => (
               <MessageView
                 key={m.id}
@@ -393,6 +420,7 @@ export function App() {
                 claims={claimsByMessage.get(m.id) ?? []}
                 streaming={m.id === streamingId}
                 analysing={analysingIds.has(m.id)}
+                extracting={extractingIds.has(m.id)}
                 showSupported={settings.showSupported}
                 minImportance={settings.minImportance}
                 queueCorrections={settings.queueCorrections}
@@ -416,12 +444,12 @@ export function App() {
               {error}
             </div>
           )}
-          {!apiKey && !serverKey && (
+          {keysLoaded && !hasKeys && (
             <div className="notice">
               <button className="link" onClick={() => setShowSettings(true)}>
-                Add your Anthropic API key
+                {Object.keys(keys).length ? `Add a ${PROVIDERS[missing].label} key` : "Add an API key"}
               </button>{" "}
-              to start.
+              {Object.keys(keys).length ? `for ${modelLabel(missingModel)}, or pick another model.` : "to start."}
             </div>
           )}
           <form
@@ -444,7 +472,13 @@ export function App() {
               rows={1}
               autoFocus
             />
-            <button className="send" type="submit" disabled={busy || !draft.trim()} aria-label="Send">
+            <button
+              className="send"
+              type="submit"
+              disabled={busy || !draft.trim() || !hasKeys}
+              aria-label="Send"
+              title={hasKeys ? undefined : "Add an API key in Settings first"}
+            >
               ↑
             </button>
           </form>
@@ -452,19 +486,17 @@ export function App() {
         </div>
       </main>
 
+      {showAbout && <AboutDialog onClose={() => setShowAbout(false)} />}
       {showSettings && (
         <SettingsDialog
           settings={settings}
-          apiKey={apiKey}
-          openrouterKey={loadOpenRouterKey()}
+          keys={keys}
           onClose={() => setShowSettings(false)}
-          onSave={(s, k, orKey) => {
-            saveOpenRouterKey(orKey);
+          onSave={(s, k) => {
             setSettings(s);
             saveSettings(s);
-            setApiKey(k.trim());
-            saveApiKey(k);
-            setShowSettings(false);
+            setKeys(k);
+            saveKeys(k);
           }}
         />
       )}

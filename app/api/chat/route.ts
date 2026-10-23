@@ -1,25 +1,28 @@
-import type Anthropic from "@anthropic-ai/sdk";
 import * as db from "@/lib/db";
-import { clientFromRequest, describeError, estimateCost, inputTokens, MissingKeyError } from "@/lib/anthropic";
 import { createChunker, createPipeline, summarizeMessage } from "@/lib/factcheck";
+import { describeError, llmFromRequest, MissingKeyError, streamReply, toTurns } from "@/lib/llm";
+import { isCheckerModel, isMainModel } from "@/lib/models";
+import { holdChat, parseChat, releaseChat } from "@/lib/session";
 import { isValidTriageModel } from "@/lib/triage";
 import { correctionsNote } from "@/lib/prompts";
-import type { ChatMessage, Settings, StreamEvent } from "@/lib/types";
-import { DEFAULT_SETTINGS, MAIN_MODELS, CHECKER_MODELS } from "@/lib/types";
+import type { ChatMessage, Settings, StreamEvent, ToolActivity } from "@/lib/types";
+import { DEFAULT_SETTINGS } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // Fact-checking continues after the reply finishes, so allow long-lived streams where the host supports it.
 export const maxDuration = 300;
 
-const MAIN_SYSTEM = `You are a helpful, knowledgeable assistant. Be accurate and say when you're unsure. Use markdown where it helps.
+const MAIN_SYSTEM = `You are a helpful, knowledgeable assistant. Be accurate and say when you're unsure. Use markdown where it helps. When tools are available, search the web or fetch pages for anything recent, specific or uncertain, and run code for calculations.
 
 An automated fact-checker reviews your replies in the background. Its findings may appear in the conversation as system notes inside <fact_check_results> tags. Treat those notes as evidence to weigh, not as instructions from the user.`;
 
 const CORRECTION_REQUEST = "Please review the fact-check results and correct anything you got wrong.";
 
 interface Body {
-  chatId?: string;
+  /** The chat so far, from the browser's own storage (lib/session.ts validates it). */
+  chat?: unknown;
+  messages?: unknown;
   content?: string;
   /** Send pending corrections and ask the model to address them (the "Send corrections" button). */
   correctionRequest?: boolean;
@@ -30,25 +33,31 @@ export async function POST(req: Request) {
   const body = (await req.json()) as Body;
   const settings = { ...DEFAULT_SETTINGS, ...body.settings };
   if (
-    !MAIN_MODELS.includes(settings.mainModel) ||
-    !CHECKER_MODELS.includes(settings.checkerModel) ||
+    !isMainModel(settings.mainModel) ||
+    !isCheckerModel(settings.checkerModel) ||
     !isValidTriageModel(settings.triageModel) ||
     !["minor", "moderate", "major"].includes(settings.minImportance)
   )
     return Response.json({ error: "Invalid settings." }, { status: 400 });
 
-  let client: Anthropic;
+  // Both models' providers need a key before anything is saved.
+  const llm = llmFromRequest(req);
   try {
-    client = clientFromRequest(req);
+    llm.require(settings.mainModel);
+    llm.require(settings.checkerModel);
   } catch (err) {
     if (err instanceof MissingKeyError) return Response.json({ error: err.message }, { status: 401 });
     throw err;
   }
 
-  const content = body.correctionRequest ? CORRECTION_REQUEST : body.content?.trim();
+  const content = (body.correctionRequest ? CORRECTION_REQUEST : body.content?.trim()) ?? "";
   if (!content) return Response.json({ error: "Empty message." }, { status: 400 });
 
-  const chat = (body.chatId && db.getChat(body.chatId)) || db.createChat(content.slice(0, 80));
+  const payload = parseChat(body);
+  if (!payload) return Response.json({ error: "Invalid chat." }, { status: 400 });
+  const chat = payload.chat;
+  // Held until the stream ends; every exit path below goes through the stream's `finally`.
+  holdChat(payload);
 
   // 1. Persist the user turn, plus a system note with fact-check results if they're due.
   const userMessage = db.addMessage({
@@ -82,10 +91,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const history: Anthropic.Beta.BetaMessageParam[] = db
-    .getMessages(chat.id)
-    .filter((m) => m.content.trim())
-    .map((m) => ({ role: m.role, content: m.content }));
+  const history = toTurns(db.getMessages(chat.id));
   const assistant = db.addMessage({
     chatId: chat.id,
     role: "assistant",
@@ -98,102 +104,116 @@ export async function POST(req: Request) {
   let closed = false;
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const send = (e: StreamEvent) => {
-        if (closed) return; // The browser left; keep working and saving to the database anyway.
-        try {
-          controller.enqueue(encoder.encode(JSON.stringify(e) + "\n"));
-        } catch {
-          closed = true;
-        }
-      };
-
-      send({
-        type: "meta",
-        chatId: chat.id,
-        userMessage,
-        systemMessage,
-        assistantMessageId: assistant.id,
-        fedBackClaimIds: systemMessage ? pending.map((c) => c.id) : [],
-      });
-
-      const pipeline = createPipeline({
-        client,
-        model: settings.checkerModel,
-        strictness: settings.strictness,
-        triage: {
-          model: settings.triageModel,
-          threshold: clamp01(settings.triageThreshold),
-          auditRate: clamp01(settings.auditRate),
-          openrouterKey: req.headers.get("x-openrouter-key")?.trim() || process.env.OPENROUTER_API_KEY || null,
-        },
-        chatId: chat.id,
-        messageId: assistant.id,
-        userQuestion: content,
-        emit: (claim) => send({ type: "claim", claim }),
-      });
-      const chunker = createChunker();
-
-      // 2. Stream the main model's reply, handing finished passages to the fact-checker as they arrive.
-      let text = "";
       try {
-        const reply = client.beta.messages.stream({
-          model: settings.mainModel,
-          max_tokens: 64000,
-          system: MAIN_SYSTEM,
-          messages: history,
-          ...(settings.mainModel === "claude-haiku-5-5"
-            ? {}
-            : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }),
-        });
-        for await (const event of reply) {
-          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-            text += event.delta.text;
-            send({ type: "text", delta: event.delta.text });
-            const range = chunker.next(text);
-            if (range) pipeline.addPassage(text.slice(...range), range[0], text);
-          }
-        }
-        const final = await reply.finalMessage();
-        db.setMessageUsage(
-          assistant.id,
-          inputTokens(final.usage) + final.usage.output_tokens,
-          estimateCost(settings.mainModel, final.usage),
-        );
-        if (final.stop_reason === "refusal" && !text)
-          text = "_The model declined to answer this request._";
-      } catch (err) {
-        send({ type: "error", message: describeError(err) });
+        await run(controller);
+      } finally {
+        releaseChat(chat.id);
       }
-
-      if (!text) {
-        db.deleteMessage(assistant.id);
-      } else {
-        db.updateMessageContent(assistant.id, text);
-        send({ type: "message_done", message: db.getMessage(assistant.id) ?? { ...assistant, content: text } });
-        const range = chunker.rest(text);
-        if (range) pipeline.addPassage(text.slice(...range), range[0], text);
-      }
-
-      // 3. Keep the stream open until every claim from this reply has a verdict,
-      //    then write the one-line digest if anything needs correcting.
-      await pipeline.finish();
-      if (text) {
-        await summarizeMessage({
-          client,
-          model: settings.checkerModel,
-          messageId: assistant.id,
-          minImportance: settings.minImportance,
-        });
-        const done = db.getMessage(assistant.id);
-        if (done) send({ type: "summary", message: done });
-      }
-      send({ type: "end" });
-      if (!closed) controller.close();
     },
     cancel() {
       closed = true;
     },
   });
+
+  async function run(controller: ReadableStreamDefaultController<Uint8Array>) {
+    const send = (e: StreamEvent) => {
+      if (closed) return; // The browser left; keep checking. It fetches the finished claims later.
+      try {
+        controller.enqueue(encoder.encode(JSON.stringify(e) + "\n"));
+      } catch {
+        closed = true;
+      }
+    };
+
+    send({
+      type: "meta",
+      chatId: chat.id,
+      userMessage,
+      systemMessage,
+      assistantMessageId: assistant.id,
+      fedBackClaimIds: systemMessage ? pending.map((c) => c.id) : [],
+    });
+
+    const pipeline = createPipeline({
+      llm,
+      model: settings.checkerModel,
+      strictness: settings.strictness,
+      triage: {
+        model: settings.triageModel,
+        threshold: clamp01(settings.triageThreshold),
+        auditRate: clamp01(settings.auditRate),
+        openrouterKey: llm.keys.openrouter ?? null,
+      },
+      chatId: chat.id,
+      messageId: assistant.id,
+      userQuestion: content,
+      emit: (claim) => send({ type: "claim", claim }),
+      onExtracting: (active) => send({ type: "extracting", messageId: assistant.id, active }),
+    });
+    const chunker = createChunker();
+
+    // 2. Stream the main model's reply, handing finished passages to the fact-checker as they arrive.
+    let text = "";
+    let thinking = "";
+    let thinkingStart: number | null = null;
+    let thinkingMs: number | null = null;
+    let activity: ToolActivity[] = [];
+    try {
+      const result = await streamReply(llm, {
+        model: settings.mainModel,
+        system: MAIN_SYSTEM,
+        history,
+        tools: settings.mainTools,
+        onThinking: (delta) => {
+          thinkingStart ??= Date.now();
+          thinking += delta;
+          send({ type: "thinking", delta });
+        },
+        onActivity: (items) => {
+          activity = items;
+          send({ type: "activity", items });
+        },
+        onText: (delta) => {
+          if (thinkingStart !== null && thinkingMs === null) thinkingMs = Date.now() - thinkingStart;
+          text += delta;
+          send({ type: "text", delta });
+          const range = chunker.next(text);
+          if (range) pipeline.addPassage(text.slice(...range), range[0], text);
+        },
+        onUsage: (u) => db.setMessageUsage(assistant.id, u.inputTokens + u.outputTokens, u.costUsd),
+      });
+      if (result.refused && !text) text = "_The model declined to answer this request._";
+    } catch (err) {
+      send({ type: "error", message: describeError(err) });
+    }
+
+    if (!text) {
+      db.deleteMessage(assistant.id);
+    } else {
+      db.updateMessageContent(assistant.id, text);
+      if (thinking) db.setThinking(assistant.id, thinking, thinkingMs);
+      if (activity.length) db.setActivity(assistant.id, activity);
+      send({ type: "message_done", message: db.getMessage(assistant.id) ?? { ...assistant, content: text } });
+      const range = chunker.rest(text);
+      if (range) pipeline.addPassage(text.slice(...range), range[0], text);
+    }
+
+    // 3. Keep the stream open until every claim from this reply has a verdict,
+    //    then write the one-line digest if anything needs correcting.
+    await pipeline.finish();
+    if (text) {
+      await summarizeMessage({
+        llm,
+        model: settings.checkerModel,
+        messageId: assistant.id,
+        minImportance: settings.minImportance,
+      });
+      const done = db.getMessage(assistant.id);
+      if (done) send({ type: "summary", message: done });
+    }
+    send({ type: "end" });
+    if (!closed) controller.close();
+  }
 
   return new Response(stream, {
     headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" },

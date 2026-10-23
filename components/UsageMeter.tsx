@@ -1,6 +1,8 @@
 import type { ChatMessage, Claim } from "@/lib/types";
 import { formatCost } from "./status";
 
+const BRANDS: Record<string, string> = { gpt: "GPT", glm: "GLM", deepseek: "DeepSeek" };
+
 /** "claude-opus-5-5" → "Opus 5.5", "~typesafe/jev-latest" → "Jev", "openai/gpt-6-luna" → "GPT-6 Luna". */
 export function modelLabel(id: string): string {
   const parts = id
@@ -15,7 +17,7 @@ export function modelLabel(id: string): string {
     const prev = out[out.length - 1];
     if (/^\d+$/.test(p) && prev && /\d$/.test(prev)) out[out.length - 1] = `${prev}.${p}`;
     else if (/^\d/.test(p) && prev === "GPT") out[out.length - 1] = `GPT-${p}`;
-    else out.push(p === "gpt" ? "GPT" : /^v\d/.test(p) ? p : p.charAt(0).toUpperCase() + p.slice(1));
+    else out.push(BRANDS[p] ?? (/^v\d/.test(p) ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1)));
   }
   return out.join(" ");
 }

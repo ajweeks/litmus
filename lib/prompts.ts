@@ -68,6 +68,10 @@ Extract the claims from <passage_to_extract_from> only. Use the reply context on
 
 const VERDICTS = `Judge the claim the way a careful expert would judge a conversational answer, not a reference work. Rounded or approximate figures, conventional dates (such as "around 2560 BC"), standard simplifications, and the commonly accepted version of a fact all count as "supported". Don't mark a claim down because it leaves out detail, because scholars give a range around the stated value, or because a more precise figure exists. A verdict other than "supported" must point to something specific in the claim that is actually wrong or would actually mislead.
 
+Many quantities have no single right value: nutrition figures (grams of protein in tofu), population and cost estimates, durations, yields, and anything that varies by brand, variety, method, region or source. For these, the claim is "supported" if the stated value or range falls within what reputable sources report, even if one source gives a different number. Never "correct" one reasonable figure to another reasonable figure; only flag it if it falls clearly outside the range sources give.
+
+Set a high bar for "misleading". A confident tone, enthusiasm, emphasis, a simplification, or a missing caveat that wouldn't change what a reader does is not misleading. Use it only when a typical reader would come away believing something specific and false that matters to them. When you're torn between "supported" and a problem verdict, choose "supported".
+
 Choose one verdict:
 - "supported": reliable sources confirm the claim as stated, at the precision it was stated.
 - "partially_supported": the core is right, but a specific stated detail is wrong (for example the year, the person, or a number that's materially off).
@@ -77,17 +81,21 @@ Choose one verdict:
 
 If the claim gives figures that were once right but have since changed, and the reply presents them as current, use "partially_supported" and give the up-to-date figure.`;
 
-export function verifierSystem(strictness: Strictness, today: string): string {
+/**
+ * `mode` is how the verdict is recorded: Claude calls a tool; other providers write the fields out
+ * and a second, structured call turns that write-up into the record (see VERDICT_RECORD_SYSTEM).
+ */
+export function verifierSystem(strictness: Strictness, today: string, mode: "tool" | "notes" = "tool"): string {
   const extra =
     strictness === "facts"
       ? ""
       : `
 
-Interpretive claims: decide whether the claim fairly represents the balance of expert opinion and evidence. If it presents a contested view as settled, use "misleading" and say what the disagreement is.${
+Interpretive claims: decide whether the claim fairly represents the balance of expert opinion and evidence. If it presents a genuinely contested view as settled (where serious experts actually disagree, not just a few dissenters), use "misleading" and say what the disagreement is. Strong but mainstream judgments are "supported".${
           strictness === "critique"
             ? `
 
-Framing issues: the claim describes an impression a passage creates. Decide whether that impression is accurate. If the passage leaves out a caveat that matters or overstates certainty, use "misleading" and give the missing context as the correction.`
+Framing issues: the claim describes an impression a passage creates. Decide whether that impression is accurate. Use "misleading" only if the passage leaves out a caveat that would change a reader's decision, or overstates certainty enough to make them believe something false; give the missing context as the correction. Ordinary emphasis or upbeat phrasing is not overselling.`
             : ""
         }`;
 
@@ -101,13 +109,17 @@ Be efficient. Most claims need one or two searches.
 
 ${VERDICTS}${extra}
 
-When you have enough evidence, first write one or two sentences stating the key evidence, citing the search results it comes from. Then call the submit_verdict tool exactly once:
+When you have enough evidence, first write one or two sentences stating the key evidence, citing the search results it comes from. ${
+    mode === "tool"
+      ? "Then call the submit_verdict tool exactly once:"
+      : "Then write out the verdict with each of these fields on its own line, labelled with its name:"
+  }
 - "summary": one short sentence explaining the verdict, written for a busy reader (under 25 words). If the verdict is not "supported", wrap the corrected fact (the few words the reader most needs to notice, such as the right name, date or number) in **double asterisks**. Bold nothing else.
 - "correction": if the verdict is not "supported", the accurate version of the claim as one sentence, with the part that differs from the claim in **double asterisks**. Otherwise an empty string.
 - "importance": for verdicts other than "supported" and "unverifiable", how much the error matters to someone relying on the answer:
   - "major": they would be materially misled. Examples: the wrong person, event or date; a number off by a lot; false health, safety, legal or financial information.
-  - "moderate": a clear factual error in a secondary detail.
-  - "minor": technically inaccurate, but it wouldn't change anyone's understanding or decisions.
+  - "moderate": a clear factual error in a secondary detail that a reader might rely on.
+  - "minor": technically inaccurate, but it wouldn't change anyone's understanding or decisions. Differences between reasonable estimates, extra nuance, and wording quibbles are minor at most.
   For "supported" and "unverifiable", use "minor".
 - "volatility": how quickly the truth of this claim can change, which decides how long the verdict can be reused:
   - "stable": historical facts, definitions, physical constants, settled science.
@@ -149,6 +161,15 @@ An automated fact-checker reviewed claims from your earlier replies against web 
 
 ${lines.join("\n")}
 </fact_check_results>`;
+}
+
+/** Turns a non-Claude verifier's write-up into the verdict record. */
+export const VERDICT_RECORD_SYSTEM = `You convert a fact-checker's write-up into its structured verdict record. Copy the verdict, importance, volatility, confidence, summary, correction and sources from the write-up. Keep the summary's and correction's **double asterisks**. Don't change any judgment, and don't add anything the write-up doesn't say. If a field is missing, use the most conservative value: "unverifiable", "minor", "slow", a confidence of 0.5, an empty string, or no sources.
+
+Sources: use only URLs from <retrieved_urls>, matching each source in the write-up to its URL there (the write-up may name a site or title instead of the full URL). Drop any source you can't match. Copy quotes exactly as the write-up gives them.`;
+
+export function verdictRecordUser(writeUp: string, urls: string[]): string {
+  return `<write_up>\n${writeUp}\n</write_up>\n\n<retrieved_urls>\n${urls.join("\n") || "(none)"}\n</retrieved_urls>`;
 }
 
 export const SUMMARY_SYSTEM = `You write the one-line fact-check note shown under an AI assistant's answer. You get the problems an automated fact-checker found in that answer, and nothing else.

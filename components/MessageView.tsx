@@ -8,6 +8,9 @@ import type { ChatMessage, Claim, Importance } from "@/lib/types";
 import { CORRECTABLE_STATUSES, isNotableProblem } from "@/lib/types";
 import { Bold } from "./Bold";
 import { ClaimNote } from "./ClaimNote";
+import { CopyButton } from "./CopyButton";
+import { Thinking } from "./Thinking";
+import { TimeAgo, duration } from "./TimeAgo";
 import { SEVERITY, STATUS, isPending } from "./status";
 
 interface Props {
@@ -16,6 +19,8 @@ interface Props {
   streaming: boolean;
   /** The server is still extracting/checking claims for this answer. */
   analysing: boolean;
+  /** A passage of this answer is being scanned for claims right now. */
+  extracting: boolean;
   showSupported: boolean;
   minImportance: Importance;
   queueCorrections: boolean;
@@ -36,6 +41,7 @@ const Markdown = memo(function Markdown({ text, targets }: { text: string; targe
 
 export function MessageView(p: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
   const marginRef = useRef<HTMLDivElement>(null);
   /** Footer tally whose claims are shown in the margin (e.g. "supported"). */
   const [openBucket, setOpenBucket] = useState<string | null>(null);
@@ -66,8 +72,9 @@ export function MessageView(p: Props) {
   // Pin each margin note next to its highlight, pushing notes down so they never overlap.
   useLayoutEffect(() => {
     const body = bodyRef.current;
+    const main = mainRef.current;
     const margin = marginRef.current;
-    if (!body || !margin) return;
+    if (!body || !main || !margin) return;
 
     const layout = () => {
       const notes = [...margin.querySelectorAll<HTMLElement>("[data-note-id]")];
@@ -77,7 +84,8 @@ export function MessageView(p: Props) {
         margin.style.minHeight = "";
         return;
       }
-      const base = body.getBoundingClientRect().top;
+      // Measured from the margin's own top, so anything above the answer (the thinking block) counts.
+      const base = margin.getBoundingClientRect().top;
       const placed = notes
         .map((n) => {
           const mark = body.querySelector<HTMLElement>(`mark[data-claim-id="${n.dataset.noteId}"]`);
@@ -95,7 +103,8 @@ export function MessageView(p: Props) {
 
     layout();
     const ro = new ResizeObserver(layout);
-    ro.observe(body);
+    // The whole column, so expanding the thinking block above the answer re-pins the notes.
+    ro.observe(main);
     margin.querySelectorAll("[data-note-id]").forEach((n) => ro.observe(n));
     return () => ro.disconnect();
   });
@@ -115,9 +124,12 @@ export function MessageView(p: Props) {
   if (p.message.role === "user") {
     const auto = p.message.kind === "correction_request";
     return (
-      <div className="turn turn--user">
+      <div className="turn turn--user" id={`turn-${p.message.id}`}>
         <div className="turn__label">{auto ? "Auto" : "You"}</div>
-        <div className={`question${auto ? " question--auto" : ""}`}>{p.message.content}</div>
+        <div>
+          <div className={`question${auto ? " question--auto" : ""}`}>{p.message.content}</div>
+          <TimeAgo className="question__time" at={p.message.createdAt} />
+        </div>
       </div>
     );
   }
@@ -151,7 +163,14 @@ export function MessageView(p: Props) {
   return (
     <div className="turn turn--assistant">
       <div className="turn__label">{p.streaming ? <span className="live" /> : "Answer"}</div>
-      <div className="turn__main">
+      <div className="turn__main" ref={mainRef}>
+        {(!!p.message.thinking || !!p.message.activity?.length) && (
+          <Thinking
+            text={p.message.thinking ?? ""}
+            activity={p.message.activity ?? []}
+            active={p.streaming && !p.message.content}
+          />
+        )}
         <div className="prose" ref={bodyRef} onClick={onBodyClick}>
           <Markdown text={p.message.content} targets={targets} />
           {p.streaming && <span className="cursor" />}
@@ -172,17 +191,15 @@ export function MessageView(p: Props) {
           </div>
         )}
 
-        {(p.claims.length > 0 || (!p.streaming && p.message.content)) && (
+        {(p.claims.length > 0 || p.extracting || (!p.streaming && p.message.content)) && (
           <div className="turn__footer">
-            {p.claims.length === 0 &&
-              !p.streaming &&
-              (p.analysing ? (
-                <span className="tally">
-                  <span className="spinner" /> finding claims…
-                </span>
-              ) : (
-                <span>No checkable claims</span>
-              ))}
+            {p.extracting || (p.claims.length === 0 && !p.streaming && p.analysing) ? (
+              <span className="tally" title="Claims are pulled out paragraph by paragraph while the answer is written">
+                <span className="spinner" /> finding claims
+              </span>
+            ) : (
+              p.claims.length === 0 && !p.streaming && <span>No checkable claims</span>
+            )}
             {counts.map(([key, n]) => (
               <button
                 key={key}
@@ -213,6 +230,12 @@ export function MessageView(p: Props) {
                 </button>
               </span>
             )}
+            {!p.streaming && !!p.message.thinkingMs && (
+              <span className="turn__time" title="Time spent reasoning before answering">
+                thought for {duration(p.message.thinkingMs)}
+              </span>
+            )}
+            {!p.streaming && p.message.content && <CopyButton text={p.message.content} />}
           </div>
         )}
 
