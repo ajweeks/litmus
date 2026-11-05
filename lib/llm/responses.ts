@@ -237,7 +237,8 @@ export async function researchResponses(provider: ResponsesProvider, a: Research
       instructions: a.system,
       input: a.user,
       ...(reasoning ? { reasoning } : {}),
-      tools: [{ type: "web_search" }],
+      // Only OpenAI's web_search takes a domain filter; the others are told in the prompt.
+      tools: [provider === "openai" && a.allowedDomains?.length ? { type: "web_search", filters: { allowed_domains: a.allowedDomains } } : { type: "web_search" }],
       ...extras(provider, { max_tool_calls: a.maxSearches }),
     })
   ).json()) as ResponseBody;

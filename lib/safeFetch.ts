@@ -99,15 +99,19 @@ export interface SafeFetchResult {
   url: string;
 }
 
-/**
- * GET a public URL with the checks above and a hard byte limit on what is read. Throws on
- * anything refused; callers treat that as "couldn't read the page".
- */
-export async function safeFetchText(
-  input: string,
-  opts: { maxBytes?: number; timeoutMs?: number; headers?: Record<string, string> } = {},
-): Promise<SafeFetchResult> {
-  const maxBytes = opts.maxBytes ?? LIMITS.pageBytes;
+export interface SafeFetchBytesResult {
+  status: number;
+  contentType: string;
+  bytes: Uint8Array;
+  /** True when the body was longer than `maxBytes` and was cut (a cut PDF can't be parsed). */
+  truncated: boolean;
+  url: string;
+}
+
+type FetchOpts = { maxBytes?: number; timeoutMs?: number; headers?: Record<string, string> };
+
+/** GET with the checks above, following redirects by hand so every hop is checked. */
+async function safeGet(input: string, opts: FetchOpts): Promise<{ res: Response; url: URL }> {
   const signal = AbortSignal.timeout(opts.timeoutMs ?? 8000);
   let url = new URL(input);
   for (let hop = 0; ; hop++) {
@@ -120,9 +124,48 @@ export async function safeFetchText(
       url = new URL(location, url);
       continue;
     }
-    const text = await readUpTo(res, maxBytes);
-    return { status: res.status, contentType: res.headers.get("content-type") ?? "", text, url: url.toString() };
+    return { res, url };
   }
+}
+
+/**
+ * GET a public URL with the checks above and a hard byte limit on what is read. Throws on
+ * anything refused; callers treat that as "couldn't read the page".
+ */
+export async function safeFetchText(input: string, opts: FetchOpts = {}): Promise<SafeFetchResult> {
+  const { res, url } = await safeGet(input, opts);
+  const text = await readUpTo(res, opts.maxBytes ?? LIMITS.pageBytes);
+  return { status: res.status, contentType: res.headers.get("content-type") ?? "", text, url: url.toString() };
+}
+
+/** Like safeFetchText, but the raw bytes (for PDFs). */
+export async function safeFetchBytes(input: string, opts: FetchOpts = {}): Promise<SafeFetchBytesResult> {
+  const { res, url } = await safeGet(input, opts);
+  const maxBytes = opts.maxBytes ?? LIMITS.pageBytes;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let truncated = false;
+  if (res.body) {
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (size + value.byteLength > maxBytes) {
+        truncated = true;
+        await reader.cancel().catch(() => {});
+        break;
+      }
+      chunks.push(value);
+      size += value.byteLength;
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    bytes.set(c, at);
+    at += c.byteLength;
+  }
+  return { status: res.status, contentType: res.headers.get("content-type") ?? "", bytes, truncated, url: url.toString() };
 }
 
 /** Read a response body as text, stopping after `maxBytes` (the rest is discarded, never buffered). */

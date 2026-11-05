@@ -200,3 +200,32 @@ export const TRIAGE_CRITERIA = {
 };
 
 export const TITLE_SYSTEM = `You name chats for a sidebar. Given the first question and answer, reply with a title of 2 to 6 words that says what the chat is about, like "Tofu protein content" or "Artemis II crew". Use sentence case, no quotes, no final full stop, nothing else.`;
+
+/**
+ * The prompts the pipeline uses, as one replaceable set. An app built on litmus can pass its own
+ * (another language, another domain, a narrower notion of "source") to `createPipeline`,
+ * `extractClaims`, `verifyClaim` and `verifyText`; anything left out falls back to these.
+ */
+export interface PromptSet {
+  extractorSystem: typeof extractorSystem;
+  extractorUser: typeof extractorUser;
+  verifierSystem: typeof verifierSystem;
+  verifierUser: typeof verifierUser;
+  verdictRecordSystem: string;
+  verdictRecordUser: typeof verdictRecordUser;
+  summarySystem: string;
+  summaryUser: typeof summaryUser;
+}
+
+export const DEFAULT_PROMPTS: PromptSet = {
+  extractorSystem,
+  extractorUser,
+  verifierSystem,
+  verifierUser,
+  verdictRecordSystem: VERDICT_RECORD_SYSTEM,
+  verdictRecordUser,
+  summarySystem: SUMMARY_SYSTEM,
+  summaryUser,
+};
+
+export const withPrompts = (p?: Partial<PromptSet>): PromptSet => ({ ...DEFAULT_PROMPTS, ...p });

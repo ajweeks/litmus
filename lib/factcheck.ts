@@ -10,25 +10,15 @@ import { LIMITS, sharedVerdicts } from "./config";
 import { isHttpUrl } from "./links";
 import { complete, describeError, generateText, Llm, research } from "./llm";
 import { providerOf } from "./models";
-import {
-  extractorSystem,
-  extractorUser,
-  SUMMARY_SYSTEM,
-  summaryUser,
-  TITLE_SYSTEM,
-  VERDICT_RECORD_SYSTEM,
-  verdictRecordUser,
-  verifierSystem,
-  verifierUser,
-} from "./prompts";
-import { verbatimQuote } from "./sources";
+import { TITLE_SYSTEM, withPrompts, type PromptSet } from "./prompts";
+import { verifyQuote } from "./sources";
 import { locate } from "./text";
 import { triageClaim, triageProvider } from "./triage";
 import type { Claim, Importance, Strictness } from "./types";
 import { isNotableProblem, isReusable, VOLATILITY_TTL_MS } from "./types";
 
-/** Calls take an Llm; the evals pass a bare Anthropic client instead. */
-type WithLlm = { llm?: Llm; client?: Anthropic };
+/** Calls take an Llm; the evals pass a bare Anthropic client instead. Prompts default to litmus's own. */
+type WithLlm = { llm?: Llm; client?: Anthropic; prompts?: Partial<PromptSet> };
 const llmOf = (a: WithLlm) => a.llm ?? Llm.fromClient(a.client!);
 
 /** The JSON text a model returned, without the code fence some wrap it in. */
@@ -94,8 +84,9 @@ export async function extractClaims(a: ExtractArgs): Promise<Claim[]> {
   const known = dedupeById([...chatClaims, ...db.recentVerifiedClaims(40)]);
   const knownIds = new Set(known.map((k) => k.id));
 
-  const system = extractorSystem(a.strictness);
-  const user = extractorUser({ userQuestion: a.userQuestion, replySoFar: a.replySoFar, passage: a.passage, known });
+  const P = withPrompts(a.prompts);
+  const system = P.extractorSystem(a.strictness);
+  const user = P.extractorUser({ userQuestion: a.userQuestion, replySoFar: a.replySoFar, passage: a.passage, known });
   let items: z.infer<typeof ExtractionSchema>["claims"];
   let usage: { input: number; output: number; cost: number };
   if (providerOf(a.model) === "anthropic") {
@@ -289,20 +280,43 @@ export interface VerifyArgs extends WithLlm {
   force?: boolean;
   /** Optional collector for every API response, e.g. for eval transcripts. */
   log?: Anthropic.Message[];
+  /** Restrict web search to these domains (apps with a list of trusted sources). */
+  allowedDomains?: string[];
 }
 
-export async function verifyClaim(args: VerifyArgs): Promise<Claim> {
-  const { model, claim, context, force, log } = args;
-  // Copy a trustworthy, fresh verdict for the same proposition instead of searching again.
-  const prior = force ? null : reusableVerdict(claim);
-  if (prior) return copyVerdict(claim, prior);
+export interface VerifiedText {
+  verdict: VerdictInput;
+  sources: (VerdictInput["sources"][number] & { retrieved: boolean })[];
+  inputTokens: number;
+  outputTokens: number;
+  searches: number;
+  costUsd: number;
+}
 
-  db.setClaimStatus(claim.id, "verifying");
+export interface VerifyTextArgs extends WithLlm {
+  model: string;
+  /** The standalone claim to check. */
+  claim: string;
+  /** Its original wording. */
+  quote: string;
+  context: string;
+  strictness?: Strictness;
+  maxSearches?: number;
+  allowedDomains?: string[];
+  log?: Anthropic.Message[];
+}
+
+/**
+ * Check one claim with web search and return the verdict without touching the database. This is
+ * the verifier an app built on litmus calls with its own prompts; `verifyClaim` wraps it for the
+ * chat. Throws when the model gives no usable verdict.
+ */
+export async function verifyText(args: VerifyTextArgs): Promise<VerifiedText> {
+  const { model, log } = args;
+  const P = withPrompts(args.prompts);
+  const strictness = args.strictness ?? "facts";
   const today = new Date().toISOString().slice(0, 10);
-  const maxSearches = claim.strictness === "facts" ? 3 : 5;
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: verifierUser(claim.claim, claim.quote, context) },
-  ];
+  const maxSearches = args.maxSearches ?? (strictness === "facts" ? 3 : 5);
   const retrievedUrls = new Set<string>();
   /** Verbatim page text the search API attached to the model's citations, by URL. */
   const citedText = new Map<string, string[]>();
@@ -311,42 +325,43 @@ export async function verifyClaim(args: VerifyArgs): Promise<Claim> {
     searches = 0,
     cost = 0;
   let verdict: VerdictInput | null = null;
-  let nudged = false;
 
-  try {
-    if (providerOf(model) !== "anthropic") {
-      // Other providers research with their own web search and write the verdict out; a second,
-      // structured call turns that write-up into the record.
-      const llm = llmOf(args);
-      const found = await research(llm, {
-        model,
-        system: verifierSystem(claim.strictness, today, "notes"),
-        user: verifierUser(claim.claim, claim.quote, context),
-        maxSearches,
-      });
-      found.retrievedUrls.forEach((u) => retrievedUrls.add(u));
-      found.citedText.forEach((t, u) => citedText.set(u, t));
-      const record = await complete(llm, {
-        model,
-        system: VERDICT_RECORD_SYSTEM,
-        user: verdictRecordUser(found.text, [...found.retrievedUrls]),
-        schema: { name: "verdict", schema: VERDICT_TOOL.input_schema as Record<string, unknown> },
-        maxTokens: 4000,
-      });
-      usageIn = found.usage.inputTokens + record.usage.inputTokens;
-      usageOut = found.usage.outputTokens + record.usage.outputTokens;
-      searches = found.usage.searches;
-      cost = found.usage.costUsd + record.usage.costUsd;
-      if (!found.text.trim() || record.refused) throw new Error("The verifier model declined to check this claim.");
-      verdict = parseVerdict(parseJson(record.text));
-    }
+  if (providerOf(model) !== "anthropic") {
+    // Other providers research with their own web search and write the verdict out; a second,
+    // structured call turns that write-up into the record.
+    const llm = llmOf(args);
+    const found = await research(llm, {
+      model,
+      system: P.verifierSystem(strictness, today, "notes"),
+      user: P.verifierUser(args.claim, args.quote, args.context),
+      maxSearches,
+      allowedDomains: args.allowedDomains,
+    });
+    found.retrievedUrls.forEach((u) => retrievedUrls.add(u));
+    found.citedText.forEach((t, u) => citedText.set(u, t));
+    const record = await complete(llm, {
+      model,
+      system: P.verdictRecordSystem,
+      user: P.verdictRecordUser(found.text, [...found.retrievedUrls]),
+      schema: { name: "verdict", schema: VERDICT_TOOL.input_schema as Record<string, unknown> },
+      maxTokens: 4000,
+    });
+    usageIn = found.usage.inputTokens + record.usage.inputTokens;
+    usageOut = found.usage.outputTokens + record.usage.outputTokens;
+    searches = found.usage.searches;
+    cost = found.usage.costUsd + record.usage.costUsd;
+    if (!found.text.trim() || record.refused) throw new Error("The verifier model declined to check this claim.");
+    verdict = parseVerdict(parseJson(record.text));
+  } else {
+    const messages: Anthropic.MessageParam[] = [{ role: "user", content: P.verifierUser(args.claim, args.quote, args.context) }];
+    let nudged = false;
     for (let turn = 0; turn < 6 && !verdict; turn++) {
       const res = await llmOf(args).anthropic().messages.create({
         model,
         max_tokens: 16000,
         output_config: { effort: "low" },
-        system: verifierSystem(claim.strictness, today),
-        tools: [webSearchTool(model, maxSearches), VERDICT_TOOL],
+        system: P.verifierSystem(strictness, today),
+        tools: [webSearchTool(model, maxSearches, args.allowedDomains), VERDICT_TOOL],
         messages,
       });
       log?.push(res);
@@ -372,17 +387,46 @@ export async function verifyClaim(args: VerifyArgs): Promise<Claim> {
       nudged = true;
       messages.push({ role: "user", content: "Call submit_verdict now with your verdict." });
     }
-    if (!verdict) throw new Error("The verifier finished without a verdict.");
+  }
+  if (!verdict) throw new Error("The verifier finished without a verdict.");
 
+  // Only keep quotes that are verifiably on the page; URLs the search didn't return get no quote.
+  const sources = await Promise.all(
+    verdict.sources.map(async (s) => {
+      const retrieved = retrievedUrls.has(s.url);
+      const checked = retrieved ? await verifyQuote(s.url, s.quote, citedText.get(s.url) ?? []) : { quote: "", verified: false, page: null };
+      return { ...s, quote: checked.quote, quoteVerified: checked.verified, page: checked.page, retrieved };
+    }),
+  );
+  return { verdict, sources, inputTokens: usageIn, outputTokens: usageOut, searches, costUsd: cost };
+}
+
+export async function verifyClaim(args: VerifyArgs): Promise<Claim> {
+  const { model, claim, context, force } = args;
+  // Copy a trustworthy, fresh verdict for the same proposition instead of searching again.
+  const prior = force ? null : reusableVerdict(claim);
+  if (prior) return copyVerdict(claim, prior);
+
+  db.setClaimStatus(claim.id, "verifying");
+  let partial = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  try {
+    const found = await verifyText({
+      llm: args.llm,
+      client: args.client,
+      prompts: args.prompts,
+      model,
+      claim: claim.claim,
+      quote: claim.quote,
+      context,
+      strictness: claim.strictness,
+      allowedDomains: args.allowedDomains,
+      log: args.log,
+    }).catch((err) => {
+      throw err;
+    });
+    partial = found;
+    const { verdict, sources } = found;
     const isProblem = verdict.verdict !== "supported" && verdict.verdict !== "unverifiable";
-    // Only keep quotes that are verifiably on the page; URLs the search didn't return get no quote.
-    const sources = await Promise.all(
-      verdict.sources.map(async (s) => {
-        const retrieved = retrievedUrls.has(s.url);
-        const quote = retrieved ? await verbatimQuote(s.url, s.quote, citedText.get(s.url) ?? []) : "";
-        return { ...s, quote, retrieved };
-      }),
-    );
     const ttl = VOLATILITY_TTL_MS[verdict.volatility];
     db.saveVerdict(claim.id, {
       status: verdict.verdict,
@@ -393,10 +437,10 @@ export async function verifyClaim(args: VerifyArgs): Promise<Claim> {
       volatility: verdict.volatility,
       expiresAt: ttl === null ? null : Date.now() + ttl,
       verifierModel: model,
-      inputTokens: usageIn,
-      outputTokens: usageOut,
-      searchCount: searches,
-      costUsd: cost,
+      inputTokens: found.inputTokens,
+      outputTokens: found.outputTokens,
+      searchCount: found.searches,
+      costUsd: found.costUsd,
       reusedFrom: null,
       sources,
     });
@@ -408,7 +452,7 @@ export async function verifyClaim(args: VerifyArgs): Promise<Claim> {
       if (old && old.id !== claim.id) db.supersede(old.id, claim.id);
     }
   } catch (err) {
-    db.addClaimUsage(claim.id, usageIn, usageOut, cost);
+    db.addClaimUsage(claim.id, partial.inputTokens, partial.outputTokens, partial.costUsd);
     db.setClaimStatus(claim.id, "error", describeError(err));
   }
   return db.getClaim(claim.id)!;
@@ -433,10 +477,11 @@ export async function summarizeMessage(opts: WithLlm & {
     return null;
   }
   try {
+    const P = withPrompts(opts.prompts);
     const res = await generateText(llmOf(opts), {
       model: opts.model,
-      system: SUMMARY_SYSTEM,
-      user: summaryUser(problems),
+      system: P.summarySystem,
+      user: P.summaryUser(problems),
       maxTokens: 2000,
     });
     db.addCheckUsage(opts.messageId, res.usage.inputTokens + res.usage.outputTokens, res.usage.costUsd);
@@ -523,6 +568,10 @@ async function triage(
 export function createPipeline(opts: {
   llm: Llm;
   model: string;
+  /** Prompts to use instead of litmus's own (an app's language or domain). */
+  prompts?: Partial<PromptSet>;
+  /** Restrict the verifier's web search to these domains. */
+  allowedDomains?: string[];
   strictness: Strictness;
   triage: TriageConfig;
   chatId: string;

@@ -36,6 +36,8 @@ export const LIMITS = {
   sources: 3,
   /** Bytes read from a source page when confirming a quote. */
   pageBytes: 3_000_000,
+  /** PDFs are read whole to extract their text (quote verification), so they get more room. */
+  pdfBytes: 20_000_000,
   /** Largest provider stream buffered while waiting for an event boundary. */
   sseBufferBytes: 4 * 1024 * 1024,
 };

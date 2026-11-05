@@ -23,9 +23,10 @@ export const inputTokens = (u: Anthropic.Usage) =>
  * The dynamic-filtering web search tool is available on Opus and Sonnet; other models get
  * the basic version.
  */
-export function webSearchTool(model: string, maxUses: number) {
-  if (/opus|sonnet/.test(model)) return { type: "web_search_20260209" as const, name: "web_search" as const, max_uses: maxUses };
-  return { type: "web_search_20250305" as const, name: "web_search" as const, max_uses: maxUses };
+export function webSearchTool(model: string, maxUses: number, allowedDomains?: string[]) {
+  const domains = allowedDomains?.length ? { allowed_domains: allowedDomains } : {};
+  if (/opus|sonnet/.test(model)) return { type: "web_search_20260209" as const, name: "web_search" as const, max_uses: maxUses, ...domains };
+  return { type: "web_search_20250305" as const, name: "web_search" as const, max_uses: maxUses, ...domains };
 }
 
 /** Tools for the main chat model: web search, web fetch and code execution, all run by Anthropic. */

@@ -70,6 +70,8 @@ export interface ResearchArgs {
   system: string;
   user: string;
   maxSearches: number;
+  /** Restrict the web search to these domains, where the provider supports it (OpenAI does). */
+  allowedDomains?: string[];
 }
 
 export interface ResearchResult {

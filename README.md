@@ -158,6 +158,10 @@ components/ClaimNote.tsx    margin note and its detail view
 - **Shared cloud database.** `lib/db.ts` is synchronous SQLite. For a hosted, multi-user database, port it to Postgres (for example Neon or Supabase). The rest of the app only calls its exported functions.
 - **Bug reports.** The "Report a bug" form emails the maintainer through SMTP. Set `REPORT_TO` (the address) and `SMTP_URL` (and optionally `REPORT_FROM`) to turn it on. Without them, the form says reports aren't set up. It allows one report per minute per sender and 30 an hour in total.
 
+## Using litmus as a library
+
+`lib/llm` (providers and keys), `lib/factcheck` (extraction and verification with prompts the caller can replace), `lib/sources` (verbatim quotes, including in PDFs), `lib/text`, `lib/api` and friends are exported as `litmus/lib/*`. Another app can depend on this repository directly, pinned to a commit: `"litmus": "github:ajweeks/litmus#<commit>"`. Its bundler must compile TypeScript from the package (in Next.js, `transpilePackages: ["litmus"]`). [Stämmer siffrorna?](https://github.com/ajweeks/siffror) is built this way.
+
 ## Ideas for the next iteration
 
 - An eval set of claims with known answers, to compare prompts, strictness levels and checker models
