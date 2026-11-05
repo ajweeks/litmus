@@ -160,7 +160,7 @@ components/ClaimNote.tsx    margin note and its detail view
 
 ## Using litmus as a library
 
-`lib/llm` (providers and keys), `lib/factcheck` (extraction and verification with prompts the caller can replace), `lib/sources` (verbatim quotes, including in PDFs), `lib/text`, `lib/api` and friends are exported as `litmus/lib/*`. Another app can depend on this repository directly, pinned to a commit: `"litmus": "github:ajweeks/litmus#<commit>"`. Its bundler must compile TypeScript from the package (in Next.js, `transpilePackages: ["litmus"]`). [Stämmer siffrorna?](https://github.com/ajweeks/siffror) is built this way.
+`lib/llm` (providers and keys), `lib/factcheck` (extraction and verification with prompts the caller can replace), `lib/sources` (verbatim quotes, including in PDFs), `lib/text`, `lib/api` and friends are exported as `litmus/lib/*`. Another app can depend on this repository directly, pinned to a release tag: `"litmus": "github:ajweeks/litmus#v0.1.0"`. Releases bump `version` in `package.json` and get a matching `v…` tag. Its bundler must compile TypeScript from the package (in Next.js, `transpilePackages: ["litmus"]`). [Stämmer siffrorna?](https://github.com/ajweeks/siffror) is built this way.
 
 ## Ideas for the next iteration
 
