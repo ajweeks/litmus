@@ -1,6 +1,8 @@
 // Calling the providers that use plain fetch: requests, server-sent-event streams, and turning
 // each provider's error format into one readable message.
 
+import { LIMITS } from "./config";
+
 export class ProviderError extends Error {
   constructor(
     message: string,
@@ -92,6 +94,8 @@ export async function* readSse<T = unknown>(res: Response, provider: string): As
     }
     if (chunk.done) break;
     buf += decoder.decode(chunk.value, { stream: true });
+    if (buf.length > LIMITS.sseBufferBytes)
+      throw new ProviderError(`${provider} sent an event too large to read.`, 0);
     let sep: RegExpMatchArray | null;
     // Events are separated by a blank line; a single event may carry several data: lines.
     while ((sep = buf.match(/\r?\n\r?\n/))) {

@@ -170,7 +170,8 @@ export async function streamResponsesReply(provider: ResponsesProvider, a: Reply
         break;
       case "response.output_item.added":
       case "response.output_item.done": {
-        const item = e.item!;
+        const item = e.item;
+        if (!item) break;
         const line = describe(item, thinkingLength);
         if (!line || !item.id) break;
         // The query and sources arrive with the finished item; the started one may not have them yet.

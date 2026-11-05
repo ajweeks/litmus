@@ -25,6 +25,9 @@ export const SEVERITY: Record<ClaimStatus, number> = {
   skipped: 8,
 };
 
+/** Label and icon for a status, tolerating a value this build doesn't know (an older or newer record). */
+export const statusInfo = (s: string): { label: string; icon: string } => STATUS[s as ClaimStatus] ?? { label: s.replace(/_/g, " "), icon: "?" };
+
 export const isPending = (s: ClaimStatus) => s === "pending" || s === "verifying";
 
 export function hostname(url: string): string {

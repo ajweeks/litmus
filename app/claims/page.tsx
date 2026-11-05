@@ -8,8 +8,8 @@ import { isReusable } from "@/lib/types";
 import { Bold } from "@/components/Bold";
 import * as store from "@/lib/chatStore";
 import { fuzzyMatcher } from "@/lib/fuzzy";
-import { STATUS, formatCost, hostname } from "@/components/status";
-import { withTextFragment } from "@/lib/sources";
+import { STATUS, formatCost, hostname, statusInfo } from "@/components/status";
+import { withTextFragment } from "@/lib/links";
 
 interface Filters {
   q: string;
@@ -41,7 +41,8 @@ const EMPTY: Filters = {
 /** The chat this page was opened from (only same-site paths), else the start page. */
 function backTo(): string {
   const from = new URLSearchParams(location.search).get("from") ?? "";
-  return from.startsWith("/") && !from.startsWith("//") ? from : "/";
+  // A same-site path only: not "//host", not "/\\host" (which browsers read as "//host"), no scheme.
+  return /^\/(?![\/\\])/.test(from) ? from : "/";
 }
 
 /** Whether a verdict is still current, and whether later chats may reuse it. */
@@ -255,7 +256,7 @@ export default function ClaimsPage() {
                   <Fragment key={c.id}>
                     <tr onClick={() => setOpen(open === c.id ? null : c.id)} className="dbtable__row">
                       <td>
-                        <span className={`pill pill--${c.status}`}>{STATUS[c.status].label}</span>
+                        <span className={`pill pill--${c.status}`}>{statusInfo(c.status).label}</span>
                         {c.importance && <div className="muted small">{c.importance}</div>}
                       </td>
                       <td>
@@ -333,7 +334,7 @@ function ClaimDetail({
               <button key={id} className="link" onClick={() => onPick(id)}>
                 {r ? (
                   <>
-                    <span className={`pill pill--${r.status}`}>{STATUS[r.status].label}</span> {r.claim}
+                    <span className={`pill pill--${r.status}`}>{statusInfo(r.status).label}</span> {r.claim}
                   </>
                 ) : (
                   id

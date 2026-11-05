@@ -17,6 +17,7 @@ import type {
   Source,
 } from "./types";
 import type { Importance, ToolActivity } from "./types";
+import { sharedVerdicts } from "./config";
 import { FINAL_STATUSES, isNotableProblem } from "./types";
 
 /** No foreign keys to chats or messages: claims outlive the chat they came from. */
@@ -184,6 +185,14 @@ type MessageRow = {
   activity: string | null;
 };
 
+function safeParse<T>(json: string): T | undefined {
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return undefined;
+  }
+}
+
 const toMessage = (r: MessageRow): ChatMessage => ({
   id: r.id,
   chatId: r.chat_id,
@@ -196,7 +205,7 @@ const toMessage = (r: MessageRow): ChatMessage => ({
   usage: { tokens: r.tokens, costUsd: r.cost_usd, checkTokens: r.check_tokens, checkCostUsd: r.check_cost_usd },
   thinking: r.thinking,
   thinkingMs: r.thinking_ms,
-  activity: r.activity ? JSON.parse(r.activity) : undefined,
+  activity: r.activity ? safeParse<ToolActivity[]>(r.activity) : undefined,
 });
 
 /** A server-side chat with a fresh id (the evals use this; the app imports chats from the browser). */
@@ -407,8 +416,9 @@ export function listClaims(filter: ClaimFilter = {}): Claim[] {
     args.push(filter.verifierModel);
   }
   if (filter.q) {
-    where.push("(claim LIKE ? OR quote LIKE ?)");
-    args.push(`%${filter.q}%`, `%${filter.q}%`);
+    const like = `%${filter.q.replace(/[\\%_]/g, "\\$&")}%`;
+    where.push("(claim LIKE ? ESCAPE '\\' OR quote LIKE ? ESCAPE '\\')");
+    args.push(like, like);
   }
   if (filter.chatId) {
     where.push("chat_id = ?");
@@ -422,7 +432,7 @@ export function listClaims(filter: ClaimFilter = {}): Claim[] {
     ORDER BY created_at ${filter.chatId ? "ASC" : "DESC"} LIMIT ?`;
   const rows = getDb()
     .prepare(sql)
-    .all(...args, filter.limit ?? 1000) as ClaimRow[];
+    .all(...args, Math.min(filter.limit ?? 1000, 5000)) as ClaimRow[];
   return hydrate(rows);
 }
 
@@ -431,8 +441,12 @@ export function getClaim(id: string): Claim | null {
   return row ? hydrate([row])[0] : null;
 }
 
-/** Recent verified claims across all chats, offered to the extractor for de-duplication. */
+/**
+ * Recent verified claims across all chats, offered to the extractor for de-duplication. Empty
+ * when verdicts aren't shared between chats (FACTCHECK_SHARED_VERDICTS=off).
+ */
 export function recentVerifiedClaims(limit = 40): Pick<Claim, "id" | "claim" | "status">[] {
+  if (!sharedVerdicts()) return [];
   const marks = FINAL_STATUSES.map(() => "?").join(",");
   return getDb()
     .prepare(
@@ -583,16 +597,21 @@ export function importChat(
     ).run(chat.id, chat.title, chat.createdAt, chat.updatedAt);
     const put = d.prepare(
       `INSERT INTO messages (id, chat_id, role, content, kind, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET content = excluded.content`,
+       ON CONFLICT(id) DO UPDATE SET content = excluded.content WHERE messages.chat_id = excluded.chat_id`,
     );
     for (const m of messages) put.run(m.id, chat.id, m.role, m.content, m.kind, m.model, m.createdAt);
   })();
 }
 
-/** Claims by id, for a browser catching up on checks that finished while it was away. */
-export function getClaims(ids: string[]): Claim[] {
-  return ids.flatMap((id) => {
-    const c = getClaim(id);
-    return c ? [c] : [];
-  });
+/**
+ * Claims by id, for a browser catching up on checks that finished while it was away. Only the
+ * claims that belong to `chatId` are returned: a claim id alone is not enough to read a claim.
+ */
+export function getClaims(ids: string[], chatId: string): Claim[] {
+  if (!ids.length) return [];
+  const marks = ids.map(() => "?").join(",");
+  const rows = getDb()
+    .prepare(`SELECT * FROM claims WHERE chat_id = ? AND id IN (${marks})`)
+    .all(chatId, ...ids) as ClaimRow[];
+  return hydrate(rows);
 }

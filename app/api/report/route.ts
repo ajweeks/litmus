@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { BadRequest, jsonError, readJson } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,35 +11,51 @@ const MAX_CHARS = 2000;
 const PER_SENDER_MS = 60_000;
 /** A ceiling across everyone, so a flood from many addresses can't fill the inbox. */
 const GLOBAL_PER_HOUR = 30;
+/** Senders remembered at once; the oldest are forgotten first. */
+const MAX_SENDERS = 10_000;
 
 const lastBySender = new Map<string, number>();
 const recent: number[] = [];
 
+/** Drop senders whose cooldown has passed, so a flood of spoofed addresses can't grow the map forever. */
+function pruneSenders(now: number) {
+  for (const [sender, at] of lastBySender) if (now - at >= PER_SENDER_MS) lastBySender.delete(sender);
+  while (lastBySender.size >= MAX_SENDERS) {
+    const oldest = lastBySender.keys().next().value;
+    if (oldest === undefined) break;
+    lastBySender.delete(oldest);
+  }
+}
+
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => ({}))) as { message?: unknown; email?: unknown };
+  let body: Record<string, unknown>;
+  try {
+    body = await readJson(req, 64 * 1024);
+  } catch (err) {
+    if (err instanceof BadRequest) return jsonError(err.message, err.status);
+    throw err;
+  }
   const message = typeof body.message === "string" ? body.message.trim() : "";
   const email = typeof body.email === "string" ? body.email.trim() : "";
-  if (!message) return Response.json({ error: "Write a description of the bug first." }, { status: 400 });
-  if (message.length > MAX_CHARS)
-    return Response.json({ error: `Keep it under ${MAX_CHARS} characters.` }, { status: 400 });
+  if (!message) return jsonError("Write a description of the bug first.");
+  if (message.length > MAX_CHARS) return jsonError(`Keep it under ${MAX_CHARS} characters.`);
   if (email && (email.length > 200 || !/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(email)))
-    return Response.json({ error: "That email address doesn't look right." }, { status: 400 });
+    return jsonError("That email address doesn't look right.");
 
   const now = Date.now();
-  const sender = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
+  // Behind a proxy this is the client address; without one it's whatever the client sent, which
+  // is why the global ceiling exists as well.
+  const sender = req.headers.get("x-forwarded-for")?.split(",")[0].trim().slice(0, 100) || "unknown";
+  pruneSenders(now);
   const last = lastBySender.get(sender) ?? 0;
   if (now - last < PER_SENDER_MS)
-    return Response.json(
-      { error: `You can send one report a minute. Try again in ${Math.ceil((PER_SENDER_MS - (now - last)) / 1000)}s.` },
-      { status: 429 },
-    );
+    return jsonError(`You can send one report a minute. Try again in ${Math.ceil((PER_SENDER_MS - (now - last)) / 1000)}s.`, 429);
   while (recent.length && now - recent[0] > 3600_000) recent.shift();
-  if (recent.length >= GLOBAL_PER_HOUR)
-    return Response.json({ error: "Too many reports right now. Try again later." }, { status: 429 });
+  if (recent.length >= GLOBAL_PER_HOUR) return jsonError("Too many reports right now. Try again later.", 429);
 
   const smtp = process.env.SMTP_URL;
   const to = process.env.REPORT_TO;
-  if (!smtp || !to) return Response.json({ error: "Bug reports aren't set up on this server yet." }, { status: 503 });
+  if (!smtp || !to) return jsonError("Bug reports aren't set up on this server yet.", 503);
 
   lastBySender.set(sender, now);
   recent.push(now);
@@ -55,14 +72,14 @@ export async function POST(req: Request) {
         "",
         "--",
         `From: ${email || "(no email given)"}`,
-        `Browser: ${req.headers.get("user-agent") ?? "unknown"}`,
+        `Browser: ${(req.headers.get("user-agent") ?? "unknown").slice(0, 300)}`,
         `Sent: ${new Date(now).toISOString()}`,
       ].join("\n"),
     });
   } catch (err) {
     console.error("bug report failed:", err);
     lastBySender.delete(sender);
-    return Response.json({ error: "Couldn't send the report. Try again later." }, { status: 502 });
+    return jsonError("Couldn't send the report. Try again later.", 502);
   }
   return Response.json({ ok: true });
 }

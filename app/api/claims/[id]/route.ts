@@ -1,37 +1,51 @@
 import * as db from "@/lib/db";
+import { BadRequest, chatParam, isId, isImportance, jsonError, readJson } from "@/lib/api";
 import { summarizeMessage, verifyClaim } from "@/lib/factcheck";
-import { llmFromRequest, MissingKeyError } from "@/lib/llm";
+import { describeError, llmFromRequest, MissingKeyError } from "@/lib/llm";
 import { holdChat, parseChat, releaseChat } from "@/lib/session";
 import { isCheckerModel } from "@/lib/models";
-import type { Importance } from "@/lib/types";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const claim = db.getClaim((await ctx.params).id);
-  return claim ? Response.json(claim) : Response.json({ error: "Not found" }, { status: 404 });
+/** One claim, for the chat it belongs to (?chat=<chat id>). */
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const chat = chatParam(req);
+  if (!chat) return jsonError("Missing or invalid chat id.");
+  const { id } = await ctx.params;
+  const claim = isId(id) ? db.getClaim(id) : null;
+  if (!claim || claim.chatId !== chat) return jsonError("Not found", 404);
+  return Response.json(claim);
 }
 
 /** Re-verify one claim from scratch, e.g. after changing the checker model or prompts. */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const claim = db.getClaim((await ctx.params).id);
-  if (!claim) return Response.json({ error: "Not found" }, { status: 404 });
-  const body = (await req.json().catch(() => ({}))) as { model?: string; minImportance?: Importance };
-  const { model = DEFAULT_SETTINGS.checkerModel, minImportance = DEFAULT_SETTINGS.minImportance } = body;
-  if (!isCheckerModel(model) || !["minor", "moderate", "major"].includes(minImportance))
-    return Response.json({ error: "Invalid settings." }, { status: 400 });
-  // The browser sends the chat too: the message gives the verifier context, and the summary is stored on it.
+  let body: Record<string, unknown>;
+  try {
+    body = await readJson(req);
+  } catch (err) {
+    if (err instanceof BadRequest) return jsonError(err.message, err.status);
+    throw err;
+  }
+  // The browser sends the chat too: it proves the claim is the caller's, gives the verifier
+  // context, and the summary is stored on its message.
   const payload = parseChat(body);
-  if (!payload || payload.chat.id !== claim.chatId) return Response.json({ error: "Invalid chat." }, { status: 400 });
+  if (!payload) return jsonError("Invalid chat.");
+  const { id } = await ctx.params;
+  const claim = isId(id) ? db.getClaim(id) : null;
+  if (!claim || claim.chatId !== payload.chat.id) return jsonError("Not found", 404);
+
+  const model = typeof body.model === "string" ? body.model : DEFAULT_SETTINGS.checkerModel;
+  const minImportance = isImportance(body.minImportance) ? body.minImportance : DEFAULT_SETTINGS.minImportance;
+  if (!isCheckerModel(model)) return jsonError("Invalid settings.");
 
   const llm = llmFromRequest(req);
   try {
     llm.require(model);
   } catch (err) {
-    if (err instanceof MissingKeyError) return Response.json({ error: err.message }, { status: 401 });
+    if (err instanceof MissingKeyError) return jsonError(err.message, 401);
     throw err;
   }
   holdChat(payload);
@@ -42,6 +56,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     // The verdict changed, so the message's digest may be stale.
     await summarizeMessage({ llm, model, messageId: claim.messageId, minImportance });
     return Response.json({ claim: result, message: db.getMessage(claim.messageId), keyStatus: llm.statuses() });
+  } catch (err) {
+    return jsonError(describeError(err), 502);
   } finally {
     releaseChat(payload.chat.id);
   }

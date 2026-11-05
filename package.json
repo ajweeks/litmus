@@ -8,7 +8,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test:unit": "node --import tsx --test \"test/unit/*.test.ts\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.137.0",

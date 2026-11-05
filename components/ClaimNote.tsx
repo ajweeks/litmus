@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import type { Claim } from "@/lib/types";
-import { withTextFragment } from "@/lib/sources";
+import { withTextFragment } from "@/lib/links";
 import { Bold } from "./Bold";
-import { STATUS, hostname, isPending } from "./status";
+import { hostname, isPending, statusInfo } from "./status";
 
 interface Props {
   claim: Claim;
@@ -36,7 +36,7 @@ export function ClaimNote({ claim, minor, active, showSources, onSelect, onReche
       onClick={() => onSelect(active ? null : claim.id)}
     >
       <div className="note__head">
-        <span className="note__label">{minor ? "Minor" : STATUS[claim.status].label}</span>
+        <span className="note__label">{minor ? "Minor" : statusInfo(claim.status).label}</span>
         {claim.fedBackIn && <span className="note__sent">sent</span>}
         {claim.confidence !== null && !pending && (
           <span className="note__conf" title="Verifier confidence">

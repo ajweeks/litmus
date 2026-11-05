@@ -6,6 +6,7 @@ import * as store from "@/lib/chatStore";
 import {
   authHeaders,
   chatPayload,
+  fetchClaims,
   loadKeys,
   loadSettings,
   loadSidebar,
@@ -120,30 +121,30 @@ export function App() {
   };
 
   // If a reload or a dropped connection left claims mid-check, ask the server for them until they finish.
-  const pendingIds = useMemo(
+  const pendingKey = useMemo(
     () => [...claims.values()].filter((c) => isPending(c.status)).map((c) => c.id),
     [claims],
   ).join(",");
   useEffect(() => {
-    if (!pendingIds || !chatId) return;
+    if (!pendingKey || !chatId) return;
     const id = chatId;
+    const pending = new Set(pendingKey.split(","));
     const t = setInterval(async () => {
       if (openStreams.current > 0) return;
-      const res = await fetch(`/api/claims?ids=${pendingIds}`).catch(() => null);
-      if (!res?.ok) return;
-      const fresh = (await res.json()) as Claim[];
+      const fresh = await fetchClaims(id, [...pending]);
+      if (!fresh) return;
       const found = new Set(fresh.map((c) => c.id));
       store.updateChat(id, (d) =>
         // A claim the server no longer has was interrupted (e.g. by a restart) and won't finish.
         d.claims
-          .filter((c) => pendingIds.includes(c.id) && !found.has(c.id))
+          .filter((c) => pending.has(c.id) && !found.has(c.id))
           .map((c): Claim => ({ ...c, status: "error", error: "The check was interrupted. Re-check to try again." }))
           .concat(fresh)
           .reduce(store.upsertClaim, d),
       );
     }, 4000);
     return () => clearInterval(t);
-  }, [pendingIds, chatId]);
+  }, [pendingKey, chatId]);
 
   // ---------- sending ----------
 

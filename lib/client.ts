@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChatDetail, Settings, StreamEvent } from "./types";
+import type { ChatDetail, Claim, Settings, StreamEvent } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 import { clearAll as clearChats } from "./chatStore";
 import type { ApiKeys, Provider } from "./providers";
@@ -137,9 +137,25 @@ async function streamEvents(url: string, body: object, onEvent: (e: StreamEvent)
     while ((nl = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, nl).trim();
       buf = buf.slice(nl + 1);
-      if (line) onEvent(JSON.parse(line) as StreamEvent);
+      if (!line) continue;
+      let event: StreamEvent;
+      try {
+        event = JSON.parse(line) as StreamEvent;
+      } catch {
+        continue; // A damaged line shouldn't lose the rest of the stream.
+      }
+      if (event && typeof event.type === "string") onEvent(event);
     }
   }
+}
+
+/** The current state of these claims, for catching up after a reload or dropped connection. Null if the request failed. */
+export async function fetchClaims(chatId: string, ids: string[]): Promise<Claim[] | null> {
+  const params = new URLSearchParams({ chat: chatId, ids: ids.join(",") });
+  const res = await fetch(`/api/claims?${params}`).catch(() => null);
+  if (!res?.ok) return null;
+  const body = (await res.json().catch(() => null)) as unknown;
+  return Array.isArray(body) ? (body as Claim[]) : null;
 }
 
 // ---------- keys that didn't work ----------

@@ -82,8 +82,8 @@ export function Thinking({
                   )}
                   {a.results && a.results.length > 0 && (
                     <span className="activity__results">
-                      {a.results.filter((r) => isUrl(r.url)).map((r) => (
-                        <a key={r.url} href={r.url} target="_blank" rel="noreferrer noopener" title={r.title}>
+                      {a.results.filter((r) => isUrl(r.url)).map((r, j) => (
+                        <a key={`${j}-${r.url}`} href={r.url} target="_blank" rel="noreferrer noopener" title={r.title}>
                           {hostname(r.url)}
                         </a>
                       ))}

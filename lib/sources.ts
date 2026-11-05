@@ -3,9 +3,11 @@
 // API attaches to its citations (verbatim by construction), then the live page. Whatever is shown
 // is the page's own wording, not the model's.
 
+import { isHttpUrl, withTextFragment } from "./links";
+import { safeFetchText } from "./safeFetch";
 import { locate } from "./text";
 
-const MAX_PAGE_BYTES = 3_000_000;
+export { isHttpUrl, withTextFragment };
 
 /** Minimal HTML → text: drop scripts/styles/markup, decode common entities, keep word boundaries. */
 export function htmlToText(html: string): string {
@@ -26,16 +28,14 @@ export function htmlToText(html: string): string {
     .replace(/[ \t\r\f\v]+/g, " ");
 }
 
+/** The page's text, or null if it can't be read. Only public http(s) hosts are fetched (lib/safeFetch.ts). */
 async function fetchPageText(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; fact-check/0.1; quote verification)" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(8000),
+    const res = await safeFetchText(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; litmus/0.1; quote verification)" },
     });
-    if (!res.ok || !/text\/html|text\/plain/.test(res.headers.get("content-type") ?? "")) return null;
-    const html = (await res.text()).slice(0, MAX_PAGE_BYTES);
-    return htmlToText(html);
+    if (res.status < 200 || res.status >= 300 || !/text\/html|text\/plain/.test(res.contentType)) return null;
+    return htmlToText(res.text);
   } catch {
     return null;
   }
@@ -65,16 +65,4 @@ export async function verbatimQuote(url: string, quote: string, citedTexts: stri
   }
   // The model's quote didn't check out; fall back to what the search API itself quoted from this page.
   return citedTexts[0]?.trim() ?? "";
-}
-
-/** Link that scrolls to and highlights `quote` on the page (a URL text fragment). */
-export function withTextFragment(url: string, quote: string): string {
-  const words = quote.replace(/\s+/g, " ").trim().split(" ");
-  if (!quote.trim() || /:~:text=/.test(url)) return url;
-  // Text fragments must match exactly, so long quotes use "start,end" with a few words from each end.
-  // These characters have meaning inside the directive and must be percent-encoded.
-  const enc = (s: string) => encodeURIComponent(s).replace(/-/g, "%2D").replace(/,/g, "%2C").replace(/&/g, "%26");
-  const directive =
-    words.length > 10 ? `${enc(words.slice(0, 4).join(" "))},${enc(words.slice(-4).join(" "))}` : enc(words.join(" "));
-  return `${url}${url.includes("#") ? "" : "#"}:~:text=${directive}`;
 }

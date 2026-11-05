@@ -6,6 +6,8 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import * as db from "./db";
 import { estimateCost, inputTokens, webSearchTool } from "./anthropic";
+import { LIMITS, sharedVerdicts } from "./config";
+import { isHttpUrl } from "./links";
 import { complete, describeError, generateText, Llm, research } from "./llm";
 import { providerOf } from "./models";
 import {
@@ -22,7 +24,7 @@ import {
 import { verbatimQuote } from "./sources";
 import { locate } from "./text";
 import { triageClaim, triageProvider } from "./triage";
-import type { Claim, ClaimStatus, Importance, Source, Strictness, Volatility } from "./types";
+import type { Claim, Importance, Strictness } from "./types";
 import { isNotableProblem, isReusable, VOLATILITY_TTL_MS } from "./types";
 
 /** Calls take an Llm; the evals pass a bare Anthropic client instead. */
@@ -121,8 +123,12 @@ export async function extractClaims(a: ExtractArgs): Promise<Claim[]> {
   }
 
   const claims: Claim[] = [];
-  for (const item of items) {
-    if (a.skipQuotes?.has(quoteKey(item.quote))) continue;
+  const seenQuotes = new Set<string>();
+  for (const raw of items.slice(0, LIMITS.claimsPerPassage)) {
+    const item = { ...raw, quote: raw.quote.trim().slice(0, LIMITS.quoteChars), claim: raw.claim.trim().slice(0, LIMITS.claimChars) };
+    const key = quoteKey(item.quote);
+    if (!item.quote || !item.claim || a.skipQuotes?.has(key) || seenQuotes.has(key)) continue;
+    seenQuotes.add(key);
     const at = locate(a.passage, item.quote);
     const duplicateOf = item.duplicate_of && knownIds.has(item.duplicate_of) ? item.duplicate_of : null;
     const claim = db.insertClaim({
@@ -137,7 +143,7 @@ export async function extractClaims(a: ExtractArgs): Promise<Claim[]> {
       extractorModel: a.model,
       duplicateOf,
     });
-    for (const rel of item.related_ids) if (knownIds.has(rel)) db.linkClaims(claim.id, rel);
+    for (const rel of item.related_ids.slice(0, LIMITS.relatedIds)) if (knownIds.has(rel)) db.linkClaims(claim.id, rel);
     if (duplicateOf) db.linkClaims(claim.id, duplicateOf);
     claims.push(claim);
   }
@@ -176,7 +182,10 @@ function currentVersion(id: string): Claim | null {
 export function reusableVerdict(claim: Claim): Claim | null {
   if (!claim.duplicateOf) return null;
   const prior = currentVersion(claim.duplicateOf);
-  return prior && prior.id !== claim.id && isReusable(prior) ? prior : null;
+  if (!prior || prior.id === claim.id || !isReusable(prior)) return null;
+  // Verdicts only cross chats when the server is configured to share them.
+  if (!sharedVerdicts() && prior.chatId !== claim.chatId) return null;
+  return prior;
 }
 
 function copyVerdict(claim: Claim, prior: Claim): Claim {
@@ -237,15 +246,40 @@ const VERDICT_TOOL: Anthropic.Tool = {
   },
 };
 
-type VerdictInput = {
-  verdict: ClaimStatus;
-  importance: Importance;
-  volatility: Volatility;
-  confidence: number;
-  summary: string;
-  correction: string;
-  sources: { url: string; title: string; quote: string; stance: Source["stance"] }[];
-};
+/**
+ * What a verifier must hand back. Claude's strict tool guarantees the shape; other providers'
+ * JSON is checked here before anything reaches the database, so a malformed verdict becomes a
+ * failed check rather than a bad row.
+ */
+const VerdictSchema = z.object({
+  verdict: z.enum(["supported", "partially_supported", "misleading", "refuted", "unverifiable"]),
+  importance: z.enum(["minor", "moderate", "major"]).catch("minor"),
+  volatility: z.enum(["stable", "slow", "fast"]).catch("slow"),
+  confidence: z.coerce.number().catch(0.5).transform((c) => (Number.isFinite(c) ? Math.min(1, Math.max(0, c)) : 0.5)),
+  summary: z.string().catch("").transform((t) => t.trim().slice(0, 2000)),
+  correction: z.string().catch("").transform((t) => t.trim().slice(0, 4000)),
+  sources: z
+    .array(
+      z.object({
+        url: z.string().transform((u) => u.trim()),
+        title: z.string().catch("").transform((t) => t.slice(0, 500)),
+        quote: z.string().catch("").transform((t) => t.slice(0, 2000)),
+        stance: z.enum(["supports", "contradicts", "context"]).catch("context"),
+      }),
+    )
+    .catch([])
+    // Only web addresses can be shown as links, and each URL once.
+    .transform((xs) => xs.filter((s, i, all) => isHttpUrl(s.url) && all.findIndex((o) => o.url === s.url) === i).slice(0, LIMITS.sources)),
+});
+
+type VerdictInput = z.infer<typeof VerdictSchema>;
+
+/** Parse a verdict a model produced; throws a readable error when it isn't one. */
+export function parseVerdict(raw: unknown): VerdictInput {
+  const res = VerdictSchema.safeParse(raw);
+  if (!res.success) throw new Error("The verifier returned a malformed verdict.");
+  return res.data;
+}
 
 export interface VerifyArgs extends WithLlm {
   model: string;
@@ -304,7 +338,7 @@ export async function verifyClaim(args: VerifyArgs): Promise<Claim> {
       searches = found.usage.searches;
       cost = found.usage.costUsd + record.usage.costUsd;
       if (!found.text.trim() || record.refused) throw new Error("The verifier model declined to check this claim.");
-      verdict = parseJson(record.text) as VerdictInput;
+      verdict = parseVerdict(parseJson(record.text));
     }
     for (let turn = 0; turn < 6 && !verdict; turn++) {
       const res = await llmOf(args).anthropic().messages.create({
@@ -327,7 +361,7 @@ export async function verifyClaim(args: VerifyArgs): Promise<Claim> {
         if (block.type === "text")
           for (const c of block.citations ?? [])
             if (c.type === "web_search_result_location") citedText.set(c.url, [...(citedText.get(c.url) ?? []), c.cited_text]);
-        if (block.type === "tool_use" && block.name === "submit_verdict") verdict = block.input as VerdictInput;
+        if (block.type === "tool_use" && block.name === "submit_verdict") verdict = parseVerdict(block.input);
       }
       if (verdict) break;
       if (res.stop_reason === "refusal") throw new Error("The verifier model declined to check this claim.");
@@ -343,19 +377,16 @@ export async function verifyClaim(args: VerifyArgs): Promise<Claim> {
     const isProblem = verdict.verdict !== "supported" && verdict.verdict !== "unverifiable";
     // Only keep quotes that are verifiably on the page; URLs the search didn't return get no quote.
     const sources = await Promise.all(
-      verdict.sources
-        .filter((s, i, all) => all.findIndex((o) => o.url === s.url) === i)
-        .slice(0, 3)
-        .map(async (s) => {
-          const retrieved = retrievedUrls.has(s.url);
-          const quote = retrieved ? await verbatimQuote(s.url, s.quote, citedText.get(s.url) ?? []) : "";
-          return { ...s, quote, retrieved };
-        }),
+      verdict.sources.map(async (s) => {
+        const retrieved = retrievedUrls.has(s.url);
+        const quote = retrieved ? await verbatimQuote(s.url, s.quote, citedText.get(s.url) ?? []) : "";
+        return { ...s, quote, retrieved };
+      }),
     );
     const ttl = VOLATILITY_TTL_MS[verdict.volatility];
     db.saveVerdict(claim.id, {
       status: verdict.verdict,
-      confidence: Math.min(1, Math.max(0, verdict.confidence)),
+      confidence: verdict.confidence,
       summary: verdict.summary,
       correction: isProblem ? verdict.correction || null : null,
       importance: isProblem ? verdict.importance : null,
@@ -422,17 +453,19 @@ export async function summarizeMessage(opts: WithLlm & {
 // ---------- orchestration ----------
 
 /** Limits how many verifications run at once per pipeline. */
-function semaphore(limit: number) {
+export function semaphore(limit: number) {
   let active = 0;
   const queue: (() => void)[] = [];
   return async function run<T>(fn: () => Promise<T>): Promise<T> {
     if (active >= limit) await new Promise<void>((r) => queue.push(r));
-    active++;
+    else active++;
     try {
       return await fn();
     } finally {
-      active--;
-      queue.shift()?.();
+      // A waiter inherits this slot directly, so `active` never exceeds `limit`.
+      const next = queue.shift();
+      if (next) next();
+      else active--;
     }
   };
 }
@@ -509,6 +542,10 @@ export function createPipeline(opts: {
   const setExtracting = (delta: number) => opts.onExtracting?.((extracting += delta));
 
   function addPassage(passage: string, passageOffset: number, replySoFar: string) {
+    // Very long answers are checked up to a limit; the rest is left unchecked rather than
+    // turned into hundreds of extraction calls.
+    if (passageOffset >= LIMITS.checkChars) return;
+    if (passageOffset + passage.length > LIMITS.checkChars) passage = passage.slice(0, LIMITS.checkChars - passageOffset);
     if (!passage.trim()) return;
     tasks.push(
       (async () => {
@@ -555,36 +592,54 @@ export function createPipeline(opts: {
 
 /**
  * Splits streaming text into passages at paragraph breaks outside code fences, so
- * extraction can start before the whole reply has arrived.
+ * extraction can start before the whole reply has arrived. `next` is called with the whole
+ * reply so far on every delta; it scans only the new text, remembering where it was.
  */
 export function createChunker(minChars = 600) {
   let emittedUpTo = 0;
+  /** Scanning state: the first unscanned index, the start of the current line, and whether it's inside a fence. */
+  let pos = 0;
+  let lineStart = 0;
+  let inFence = false;
+  /** The most recent paragraph boundary after `emittedUpTo`, or -1. */
+  let cut = -1;
+
+  function scan(full: string) {
+    if (full.length < pos) {
+      // The text was replaced rather than extended: start over.
+      pos = lineStart = 0;
+      inFence = false;
+      cut = -1;
+    }
+    for (let i = pos; i < full.length; i++) {
+      if (full[i] !== "\n") continue;
+      const line = full.slice(lineStart, i);
+      if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
+      // A blank line ends a paragraph; the line after it starts at i + 1.
+      if (!inFence && line.trim() === "" && lineStart > emittedUpTo) cut = lineStart;
+      lineStart = i + 1;
+    }
+    pos = full.length;
+  }
+
   return {
     /** Returns [start, end) of a newly completed passage, if there is one. */
     next(full: string): [number, number] | null {
-      let cut = -1;
-      let inFence = false;
-      let lineStart = 0;
-      for (let i = 0; i <= full.length; i++) {
-        if (i === full.length || full[i] === "\n") {
-          const line = full.slice(lineStart, i);
-          if (line.trimStart().startsWith("```")) inFence = !inFence;
-          // A blank line ends a paragraph; the line after it must have started (i < length).
-          if (!inFence && line.trim() === "" && i < full.length && lineStart > emittedUpTo) cut = lineStart;
-          lineStart = i + 1;
-        }
-      }
+      scan(full);
       if (cut > emittedUpTo && cut - emittedUpTo >= minChars) {
         const range: [number, number] = [emittedUpTo, cut];
         emittedUpTo = cut;
+        cut = -1;
         return range;
       }
       return null;
     },
+    /** Everything after the last passage, once the text is complete. */
     rest(full: string): [number, number] | null {
       if (emittedUpTo >= full.length) return null;
       const range: [number, number] = [emittedUpTo, full.length];
       emittedUpTo = full.length;
+      cut = -1;
       return range;
     },
   };

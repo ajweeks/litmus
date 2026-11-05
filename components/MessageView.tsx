@@ -11,7 +11,7 @@ import { ClaimNote } from "./ClaimNote";
 import { CopyButton } from "./CopyButton";
 import { Thinking } from "./Thinking";
 import { TimeAgo, duration } from "./TimeAgo";
-import { SEVERITY, STATUS, isPending } from "./status";
+import { SEVERITY, isPending, statusInfo } from "./status";
 
 interface Props {
   message: ChatMessage;
@@ -157,7 +157,7 @@ export function MessageView(p: Props) {
   const unsent = problems.filter((c) => !c.fedBackIn);
   const worst = [...problems].sort((a, b) => SEVERITY[a.status] - SEVERITY[b.status])[0];
   // Footer tallies: notable problems by verdict, plus "minor", "supported" and "not checked".
-  const order = (k: string) => (k === "minor" ? 2.5 : SEVERITY[k as Claim["status"]]);
+  const order = (k: string) => (k === "minor" ? 2.5 : (SEVERITY[k as Claim["status"]] ?? 9));
   const counts = Object.entries(
     done.reduce<Record<string, number>>((acc, c) => ((acc[bucket(c)] = (acc[bucket(c)] ?? 0) + 1), acc), {}),
   ).sort(([a], [b]) => order(a) - order(b));
@@ -211,7 +211,7 @@ export function MessageView(p: Props) {
                 onClick={() => setOpenBucket(openBucket === key ? null : key)}
                 title="Show these claims and their sources in the margin"
               >
-                <i /> {n} {key === "minor" ? "minor" : STATUS[key as Claim["status"]].label.toLowerCase()}
+                <i /> {n} {key === "minor" ? "minor" : statusInfo(key).label.toLowerCase()}
               </button>
             ))}
             {/* Something in this answer's check failed and nothing is running: offer a retry. */}
